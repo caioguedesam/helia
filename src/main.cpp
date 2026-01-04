@@ -309,10 +309,14 @@ void updatePerFrameUniforms()
 void update()
 {
     PROFILE_SCOPE;
-    LOG("Update");
     if(isJustDown(&gApp.mKeys, KEY_R))
     {
         addLoadRequest(&gApp, LOAD_REQUEST_SHADER);
+    }
+
+    if(isJustDown(&gApp.mKeys, KEY_ESCAPE))
+    {
+        gApp.mRunning = false;
     }
 
     // Camera
@@ -324,13 +328,19 @@ void update()
         if(isDown(&gApp.mKeys, KEY_D)) moveDir.x = 1;
         moveCamera(&gCamera, moveDir, gApp.mDt);
         
-        if(isDown(&gApp.mKeys, KEY_RMB))
+        bool isRotating = isDown(&gApp.mKeys, KEY_RMB);
+        setHidden(&gApp.mCursor, isRotating);
+        setLocked(&gApp.mCursor, isRotating);
+        if(isRotating)
         {
+            setHidden(&gApp.mCursor, true);
+            setLocked(&gApp.mCursor, true);
             v2f rotateDir;
             getDelta(&gApp.mCursor, &rotateDir.x, &rotateDir.y);
-            rotateCamera(&gCamera, rotateDir, gApp.mDt);
+            rotateCamera(&gCamera, -rotateDir, gApp.mDt);
         }
     }
+
     updateCamera(&gCamera, gApp.mDt);
 
     updatePerFrameUniforms();
@@ -378,10 +388,7 @@ void render()
         cmdBindVertexBuffer(pCmd, pVBCube);
         cmdBindIndexBuffer(pCmd, pIBCube);
 
-        for(uint32 i = 0; i < 10000; i++)
-        {
-            cmdDrawIndexed(pCmd, ARR_LEN(cubeIndices), 1);
-        }
+        cmdDrawIndexed(pCmd, ARR_LEN(cubeIndices), 1);
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("Unlit Pass"), &gpuTimerParams);
