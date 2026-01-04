@@ -15,6 +15,8 @@
 #include "../dw/src/render/ui.hpp"
 #include "../dw/src/render/timings.hpp"
 
+#include "scene.hpp"
+
 float cubeVertices[] = {
     // Front (+Z)
     -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, // bottom-left
@@ -101,6 +103,9 @@ Camera gCamera = {};
 Timer gTimer = {};
 uint32 gFrame = 0;
 GpuTimer gGpuTimer = {};
+
+// Helia
+Scene gScene = {};
 
 #define APP_WIDTH 800
 #define APP_HEIGHT 600
@@ -275,6 +280,10 @@ void init()
             &gCamera);
 
     initGpuTimer(&gRenderer, &gGpuTimer);
+
+    // Helia
+    initScene(&gScene, MB(512), MB(128));
+    setupSceneModel(&gScene, str("../../res/models/sponza/glTF/Sponza.gltf"));
 }
 
 void shutdown()
@@ -291,6 +300,8 @@ void shutdown()
     removeBuffer(&gRenderer, &pUBPerFrame);
     removeBuffer(&gRenderer, &pIBCube);
     removeBuffer(&gRenderer, &pVBCube);
+
+    destroyScene(&gScene);
 
     destroyGpuTimer(&gGpuTimer);
     destroyUI(&gUI);
