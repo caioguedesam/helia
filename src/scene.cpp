@@ -1,9 +1,12 @@
 #include "scene.hpp"
+#include "../dw/src/core/base.hpp"
 #include "../dw/src/core/debug.hpp"
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/file.hpp"
 #include "../dw/src/core/hash_map.hpp"
-#include "dw/src/core/base.hpp"
+#include "dw/src/render/buffer.hpp"
+#include "dw/src/render/descriptor.hpp"
+#include "dw/src/render/shader.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -104,7 +107,6 @@ void setupSceneModel(Scene* pScene, String modelPath)
     options.file.release = cgltfFileRelease;
 
     cgltf_data* pGltfData = NULL;
-    //cgltf_result result = cgltf_parse(&options, (void*)pJsonData, jsonDataSize, &pGltfData);
     cgltf_result result = cgltf_parse_file(&options, cstr(modelPath), &pGltfData);
     ASSERT(result == cgltf_result_success);
 
@@ -141,12 +143,15 @@ void setupSceneModel(Scene* pScene, String modelPath)
             indexCount += pPrimitive->indices->count;
         }
     }
-    float*  pVertexData = (float*)arenaPushZero(&pScene->mArena, vertexCount * sizeof(float) * 12);
-    uint16* pIndexData  = (uint16*)arenaPushZero(&pScene->mArena, indexCount * sizeof(uint16));
+
+    pScene->vertexCount = vertexCount;
+    pScene->indexCount = indexCount;
+    pScene->pVertexData = (float*)arenaPushZero(&pScene->mArena, vertexCount * sizeof(float) * 12);
+    pScene->pIndexData  = (uint16*)arenaPushZero(&pScene->mArena, indexCount * sizeof(uint16));
 
     // Second pass: copy to allocated buffers, create scene meshes and map them by cgltf_primitive
-    void* pVertexOffset = pVertexData;
-    void* pIndexOffset = pIndexData;
+    void* pVertexOffset = pScene->pVertexData;
+    void* pIndexOffset = pScene->pIndexData;
     HashMap<void*, uint32> sceneMeshByPrimitive = hashmap<void*, uint32>(&pScene->mTempArena, 2 << 12);
     for(cgltf_size m = 0; m < pGltfData->meshes_count; m++)
     {
@@ -203,8 +208,8 @@ void setupSceneModel(Scene* pScene, String modelPath)
             ASSERT(pAccIndices->component_type == cgltf_component_type_r_16u);
             
             Mesh mesh = {};
-            mesh.mIndexStart = PTR_DIFF(pIndexOffset, pIndexData) / sizeof(uint16);
-            mesh.mIndexCount = pAccIndices->count;
+            mesh.mIndexStart = (uint32)(PTR_DIFF(pIndexOffset, pScene->pIndexData) / sizeof(uint16));
+            mesh.mIndexCount = (uint32)(pAccIndices->count);
 
             for(cgltf_size i = 0; i < pAccIndices->count; i++)
             {
@@ -233,7 +238,7 @@ void setupSceneModel(Scene* pScene, String modelPath)
             uint32 midx = sceneMeshByPrimitive[pPrimitive];
             m4f transform;
             cgltf_node_transform_world(pNode, &transform.mData[0]);
-            SceneNode sceneNode = { midx, transform };
+            SceneNode sceneNode = { transform, midx };
             pScene->mNodes[pScene->mNodeCount++] = sceneNode;
         }
     }
@@ -241,4 +246,145 @@ void setupSceneModel(Scene* pScene, String modelPath)
     // Reset scratch memory
     cgltf_free(pGltfData);
     ARENA_CHECKPOINT_RESET(&pScene->mTempArena, sceneModel);
+}
+
+void addSceneShaders(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager)
+{
+    if(!pScene->pVSGeometry)
+    {
+        loadShader(pAssetManager, pRenderer, 
+                str("../../res/shaders/geometry.vert"), 
+                &pScene->pVSGeometry);
+    }
+    if(!pScene->pPSGeometry)
+    {
+        loadShader(pAssetManager, pRenderer, 
+                str("../../res/shaders/geometry.frag"), 
+                &pScene->pPSGeometry);
+    }
+}
+
+void addSceneDescriptors(Scene* pScene, Renderer* pRenderer)
+{
+    // Scene global descriptor set
+    if(!pScene->pDSScene)
+    {
+        DescriptorSetDesc desc = {};
+        desc.mCount = 2;
+        desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pScene->pUBPerFrame, 1 };
+        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pScene->pSBNodes, 1 };
+        addDescriptorSet(pRenderer, desc, &pScene->pDSScene);
+    }
+}
+
+void addScenePipelines(Scene* pScene, Renderer* pRenderer)
+{
+    // Geometry pass pipeline
+    if(!pScene->pPipeGeometry)
+    {
+        GraphicsPipelineDesc desc = {};
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = FORMAT_RGBA8_UNORM;
+        desc.mDepthTargetFormat = FORMAT_D16_UNORM;
+
+        desc.mVertexLayout = pScene->mMeshVertexLayout;
+        desc.pVS = pScene->pVSGeometry;
+        desc.pFS = pScene->pPSGeometry;
+
+        desc.mCullMode = CULL_MODE_NONE;    // TODO(caio): Activate proper face culling
+        desc.mFrontFace = FRONT_FACE_CW;
+
+        desc.mDepthTest = true;
+        desc.mDepthWrite = true;
+        desc.mDepthOp = COMPARE_GREATER;
+
+        desc.mDescriptorSetCount = 1;
+        desc.pDescriptorSets[0] = pScene->pDSScene;
+
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+
+        addPipeline(pRenderer, desc, &pScene->pPipeGeometry);
+    }
+}
+
+void addSceneRenderResources(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager,
+        Buffer* pUBPerFrame)
+{
+    // Geometry vertex layout
+    {
+        VertexLayoutDesc desc = {};
+        desc.mCount = 4;
+        desc.mAttribs[0] = ATTRIBUTE_FLOAT3;
+        desc.mAttribs[1] = ATTRIBUTE_FLOAT3;
+        desc.mAttribs[2] = ATTRIBUTE_FLOAT2;
+        desc.mAttribs[3] = ATTRIBUTE_FLOAT4;
+        initVertexLayout(desc, &pScene->mMeshVertexLayout);
+    }
+
+    // Geometry vertex/index buffers
+    {
+        BufferDesc vbDesc = {};
+        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mSize = pScene->vertexCount * sizeof(float) * 12;
+        vbDesc.mCount = pScene->vertexCount;
+        vbDesc.mStride = sizeof(float);
+        addBuffer(pRenderer, vbDesc, &pScene->pVBScene, pScene->pVertexData);
+
+        BufferDesc ibDesc = {};
+        ibDesc.mType = BUFFER_TYPE_INDEX;
+        ibDesc.mSize = pScene->indexCount * sizeof(uint16);
+        ibDesc.mCount = pScene->indexCount;
+        ibDesc.mStride = sizeof(uint16);
+        addBuffer(pRenderer, ibDesc, &pScene->pIBScene, pScene->pIndexData);
+    }
+
+    // Scene node buffer
+    {
+        BufferDesc desc = {};
+        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mSize = sizeof(SceneNode) * SCENE_MAX_NODES;
+        desc.mCount = SCENE_MAX_NODES;
+        desc.mStride = sizeof(SceneNode);
+        addBuffer(pRenderer, desc, &pScene->pSBNodes, &pScene->mNodes[0]);
+    }
+
+    pScene->pUBPerFrame = pUBPerFrame;  // TODO: Refactor this
+
+    // Reloadable resources
+    addSceneShaders(pScene, pRenderer, pAssetManager);
+    addSceneDescriptors(pScene, pRenderer);
+    addScenePipelines(pScene, pRenderer);
+}
+
+void removeSceneShaders(Scene *pScene, Renderer *pRenderer)
+{
+    if(pScene->pVSGeometry)
+        removeShader(pRenderer, &pScene->pVSGeometry);
+    if(pScene->pPSGeometry)
+        removeShader(pRenderer, &pScene->pPSGeometry);
+}
+
+void removeSceneDescriptors(Scene *pScene, Renderer *pRenderer)
+{
+    if(pScene->pDSScene)
+        removeDescriptorSet(pRenderer, &pScene->pDSScene);
+}
+
+void removeScenePipelines(Scene *pScene, Renderer *pRenderer)
+{
+    if(pScene->pPipeGeometry)
+        removePipeline(pRenderer, &pScene->pPipeGeometry);
+}
+
+void removeSceneRenderResources(Scene* pScene, Renderer* pRenderer)
+{
+    removeSceneShaders(pScene, pRenderer);
+    removeSceneDescriptors(pScene, pRenderer);
+    removeScenePipelines(pScene, pRenderer);
+
+    removeBuffer(pRenderer, &pScene->pVBScene);
+    removeBuffer(pRenderer, &pScene->pIBScene);
+    removeBuffer(pRenderer, &pScene->pSBNodes);
 }

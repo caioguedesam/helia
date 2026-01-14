@@ -97,7 +97,7 @@ struct PerFrameUniforms
     m4f mProj = {};
 };
 PerFrameUniforms perFrameUniforms = {};
-Buffer* pUBPerFrame = NULL;
+Buffer* pUBPerFrame = NULL;     // TODO: This should be double buffered
 
 Camera gCamera = {};
 Timer gTimer = {};
@@ -141,12 +141,14 @@ void addShaders()
     loadShader(&gAssetManager, &gRenderer, 
             str("../../res/shaders/unlit.frag"), 
             &pFSUnlit);
+    addSceneShaders(&gScene, &gRenderer, &gAssetManager);
 }
 
 void removeShaders()
 {
     removeShader(&gRenderer, &pFSUnlit);
     removeShader(&gRenderer, &pVSUnlit);
+    removeSceneShaders(&gScene, &gRenderer);
 }
 
 void addDescriptors()
@@ -160,11 +162,13 @@ void addDescriptors()
         desc.mResources[2] = { DESCRIPTOR_SAMPLER, pSamplerPoint, 1 };
         addDescriptorSet(&gRenderer, desc, &pDescriptorSetPerFrame);
     }
+    addSceneDescriptors(&gScene, &gRenderer);
 }
 
 void removeDescriptors()
 {
     removeDescriptorSet(&gRenderer, &pDescriptorSetPerFrame);
+    removeSceneDescriptors(&gScene, &gRenderer);
 }
 
 void addPipelines()
@@ -192,11 +196,14 @@ void addPipelines()
 
         addPipeline(&gRenderer, desc, &pPipelineUnlit);
     }
+
+    addScenePipelines(&gScene, &gRenderer);
 }
 
 void removePipelines()
 {
     removePipeline(&gRenderer, &pPipelineUnlit);
+    removeScenePipelines(&gScene, &gRenderer);
 }
 
 void init()
@@ -260,6 +267,11 @@ void init()
         addBuffer(&gRenderer, desc, &pUBPerFrame);
     }
 
+    // Helia
+    initScene(&gScene, MB(512), MB(128));
+    setupSceneModel(&gScene, str("../../res/models/sponza/glTF/Sponza.gltf"));
+    addSceneRenderResources(&gScene, &gRenderer, &gAssetManager, pUBPerFrame);
+
     addRenderTargets();
     addShaders();
     addDescriptors();
@@ -281,9 +293,6 @@ void init()
 
     initGpuTimer(&gRenderer, &gGpuTimer);
 
-    // Helia
-    initScene(&gScene, MB(512), MB(128));
-    setupSceneModel(&gScene, str("../../res/models/sponza/glTF/Sponza.gltf"));
 }
 
 void shutdown()
@@ -294,6 +303,8 @@ void shutdown()
     removeDescriptors();
     removeShaders();
     removeRenderTargets();
+
+    removeSceneRenderResources(&gScene, &gRenderer);
 
     removeSampler(&gRenderer, &pSamplerPoint);
     removeTexture(&gRenderer, &pTexCube);
