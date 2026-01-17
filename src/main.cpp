@@ -388,7 +388,7 @@ void render()
     copyToBuffer(&gRenderer, pUBPerFrame, 0, &perFrameUniforms, sizeof(PerFrameUniforms));
     gpuTimestamp(str("Upload PerFrame"), &gpuTimerParams);
 
-    // Unlit pass
+    // Scene geometry pass
     {
         RenderTargetBarrier barriers[2];
         barriers[0] = {pTargetUnlit, getImageLayout(pTargetUnlit), IMAGE_LAYOUT_COLOR_OUTPUT };
@@ -401,16 +401,33 @@ void render()
         bindDesc.mDepthBinding = { pDepthUnlit, LOAD_OP_CLEAR, STORE_OP_STORE };
         cmdBindRenderTargets(pCmd, bindDesc);
 
-        cmdBindDescriptorSet(pCmd, pPipelineUnlit, pDescriptorSetPerFrame, 0);
-        cmdBindGraphicsPipeline(pCmd, pPipelineUnlit);
+        cmdBindDescriptorSet(pCmd, gScene.pPipeGeometry, gScene.pDSScene, 0);
+        cmdBindGraphicsPipeline(pCmd, gScene.pPipeGeometry);
+
+        //cmdBindDescriptorSet(pCmd, pPipelineUnlit, pDescriptorSetPerFrame, 0);
+        //cmdBindGraphicsPipeline(pCmd, pPipelineUnlit);
 
         cmdSetViewport(pCmd, pTargetUnlit);
         cmdSetScissor(pCmd, pTargetUnlit);
 
-        cmdBindVertexBuffer(pCmd, pVBCube);
-        cmdBindIndexBuffer(pCmd, pIBCube);
+        cmdBindVertexBuffer(pCmd, gScene.pVBScene);
+        cmdBindIndexBuffer(pCmd, gScene.pIBScene);
 
-        cmdDrawIndexed(pCmd, ARR_LEN(cubeIndices), 1);
+        for(uint32 n = 0; n < gScene.mNodeCount; n++)
+        {
+            cmdSetConstants(pCmd, gScene.pPipeGeometry, 0, sizeof(uint32), &n);
+
+            SceneNode* pNode = &gScene.mNodes[n];
+            Mesh* pMesh = &gScene.mMeshes[pNode->mMeshId];
+            //cmdDrawIndexed(pCmd, pMesh->mIndexStart, pMesh->mIndexCount, 1);
+            //cmdDrawIndexed(pCmd, pMesh->mIndexCount, 1, 0, pMesh->mVertexOffset);
+            cmdDrawIndexed(pCmd, pMesh->mIndexCount, 1, pMesh->mIndexOffset, pMesh->mVertexOffset);
+        }
+
+        //cmdBindVertexBuffer(pCmd, pVBCube);
+        //cmdBindIndexBuffer(pCmd, pIBCube);
+
+        //cmdDrawIndexed(pCmd, ARR_LEN(cubeIndices), 1);
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("Unlit Pass"), &gpuTimerParams);

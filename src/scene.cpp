@@ -179,6 +179,9 @@ void setupSceneModel(Scene* pScene, String modelPath)
             ASSERT(pAccPos);
             ASSERT(pAccPos->component_type == cgltf_component_type_r_32f);
 
+            Mesh mesh = {};
+            mesh.mVertexOffset = (uint32)(PTR_DIFF(pVertexOffset, pScene->pVertexData) / (12 * sizeof(float)));
+
             for(cgltf_size v = 0; v < pAccPos->count; v++)
             {
                 float vertex[12] =
@@ -207,8 +210,8 @@ void setupSceneModel(Scene* pScene, String modelPath)
             cgltf_accessor* pAccIndices = pPrimitive->indices;
             ASSERT(pAccIndices->component_type == cgltf_component_type_r_16u);
             
-            Mesh mesh = {};
-            mesh.mIndexStart = (uint32)(PTR_DIFF(pIndexOffset, pScene->pIndexData) / sizeof(uint16));
+            //Mesh mesh = {};
+            mesh.mIndexOffset = (uint32)(PTR_DIFF(pIndexOffset, pScene->pIndexData) / sizeof(uint16));
             mesh.mIndexCount = (uint32)(pAccIndices->count);
 
             for(cgltf_size i = 0; i < pAccIndices->count; i++)

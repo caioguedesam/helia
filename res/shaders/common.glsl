@@ -10,6 +10,7 @@ struct SceneNode
 {
     mat4 mTransform;
     uint mMeshId;
+    STRUCT_PADDING_UINT(0, 3);
 };
 
 struct PerFrameUniforms

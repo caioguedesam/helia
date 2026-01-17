@@ -14,7 +14,7 @@
 #define PS_OUT(N) layout(location = N) out
 
 #define DEFINE_UNIFORM_BLOCK(SET, BINDING) layout(std140, set = SET, binding = BINDING) uniform CONCAT(UNIFORM_BLOCK_, __LINE__)
-#define DEFINE_STORAGE_BLOCK(SET, BINDING) layout(std430, set = SET, binding = BINDING) buffer CONCAT(UNIFORM_BLOCK_, __LINE__)
+#define DEFINE_STORAGE_BLOCK(SET, BINDING) layout(std430, set = SET, binding = BINDING) buffer CONCAT(STORAGE_BLOCK_, __LINE__)
 #define DEFINE_SAMPLER2D(SET, BINDING) layout(set = SET, binding = BINDING) uniform sampler2D
 #define DEFINE_SAMPLER3D(SET, BINDING) layout(set = SET, binding = BINDING) uniform sampler3D
 

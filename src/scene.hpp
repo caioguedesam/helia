@@ -9,7 +9,8 @@
 
 struct Mesh
 {
-    uint32 mIndexStart      = 0;
+    uint32 mVertexOffset    = 0;
+    uint32 mIndexOffset     = 0;
     uint32 mIndexCount      = 0;
     // TODO(caio): Add material data
 };
@@ -19,6 +20,8 @@ struct SceneNode
     m4f mTransform      = identity();   // World-space transform
     uint32 mMeshId      = MAX_UINT32;   // Index for this node's mesh in the scene
     // TODO(caio): Add parent/child hierarchy?
+
+    uint32 mPadding0[3];
 };
 
 #define SCENE_MAX_NODES 1024
