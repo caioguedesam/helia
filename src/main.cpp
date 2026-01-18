@@ -17,77 +17,14 @@
 
 #include "scene.hpp"
 
-float cubeVertices[] = {
-    // Front (+Z)
-    -0.5f, -0.5f,  0.5f,  0.0f, 1.0f, // bottom-left
-     0.5f, -0.5f,  0.5f,  1.0f, 1.0f, // bottom-right
-     0.5f,  0.5f,  0.5f,  1.0f, 0.0f, // top-right
-    -0.5f,  0.5f,  0.5f,  0.0f, 0.0f, // top-left
-
-    // Back (-Z)
-     0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-    -0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-    -0.5f,  0.5f, -0.5f,  1.0f, 0.0f,
-     0.5f,  0.5f, -0.5f,  0.0f, 0.0f,
-
-    // Left (-X)
-    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-    -0.5f, -0.5f,  0.5f,  1.0f, 1.0f,
-    -0.5f,  0.5f,  0.5f,  1.0f, 0.0f,
-    -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,
-
-    // Right (+X)
-     0.5f, -0.5f,  0.5f,  0.0f, 1.0f,
-     0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-     0.5f,  0.5f, -0.5f,  1.0f, 0.0f,
-     0.5f,  0.5f,  0.5f,  0.0f, 0.0f,
-
-    // Top (+Y)
-    -0.5f,  0.5f,  0.5f,  0.0f, 1.0f,
-     0.5f,  0.5f,  0.5f,  1.0f, 1.0f,
-     0.5f,  0.5f, -0.5f,  1.0f, 0.0f,
-    -0.5f,  0.5f, -0.5f,  0.0f, 0.0f,
-
-    // Bottom (-Y)
-    -0.5f, -0.5f, -0.5f,  0.0f, 1.0f,
-     0.5f, -0.5f, -0.5f,  1.0f, 1.0f,
-     0.5f, -0.5f,  0.5f,  1.0f, 0.0f,
-    -0.5f, -0.5f,  0.5f,  0.0f, 0.0f
-};
-
-uint16 cubeIndices[] = {
-    // Front
-    0, 1, 2,  0, 2, 3,
-    // Back
-    4, 5, 6,  4, 6, 7,
-    // Left
-    8, 9,10,  8,10,11,
-    // Right
-    12,13,14, 12,14,15,
-     // Top
-    16,17,18, 16,18,19,
-     // Bottom
-    20,21,22, 20,22,23
-};
-
 App gApp;
 AssetManager gAssetManager;
 Renderer gRenderer;
 UIState gUI;
 
-VertexLayout gCubeVertexLayout = {};
-Buffer* pVBCube = NULL;
-Buffer* pIBCube = NULL;
-Texture* pTexCube = NULL;
-
-Sampler* pSamplerPoint = NULL;
-
-// Unlit
+// Geometry pass
 RenderTarget*       pTargetUnlit = NULL;
 RenderTarget*       pDepthUnlit = NULL;
-Shader*             pVSUnlit = NULL;
-Shader*             pFSUnlit = NULL;
-GraphicsPipeline*   pPipelineUnlit = NULL;
 DescriptorSet*      pDescriptorSetPerFrame = NULL;
 
 struct PerFrameUniforms
@@ -135,19 +72,11 @@ void removeRenderTargets()
 
 void addShaders()
 {
-    loadShader(&gAssetManager, &gRenderer, 
-            str("../../res/shaders/unlit.vert"), 
-            &pVSUnlit);
-    loadShader(&gAssetManager, &gRenderer, 
-            str("../../res/shaders/unlit.frag"), 
-            &pFSUnlit);
     addSceneShaders(&gScene, &gRenderer, &gAssetManager);
 }
 
 void removeShaders()
 {
-    removeShader(&gRenderer, &pFSUnlit);
-    removeShader(&gRenderer, &pVSUnlit);
     removeSceneShaders(&gScene, &gRenderer);
 }
 
@@ -156,10 +85,8 @@ void addDescriptors()
     // Per frame
     {
         DescriptorSetDesc desc = {};
-        desc.mCount = 3;
+        desc.mCount = 1;
         desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pUBPerFrame, 1 };
-        desc.mResources[1] = { DESCRIPTOR_TEXTURE, pTexCube, 1 };
-        desc.mResources[2] = { DESCRIPTOR_SAMPLER, pSamplerPoint, 1 };
         addDescriptorSet(&gRenderer, desc, &pDescriptorSetPerFrame);
     }
     addSceneDescriptors(&gScene, &gRenderer);
@@ -173,36 +100,11 @@ void removeDescriptors()
 
 void addPipelines()
 {
-    // Fullscreen pipeline
-    {
-        GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 1;
-        desc.mRenderTargetFormats[0] = pTargetUnlit->mDesc.mFormat;
-        desc.mDepthTargetFormat = pDepthUnlit->mDesc.mFormat;
-
-        desc.mVertexLayout = gCubeVertexLayout;
-        desc.pVS = pVSUnlit;
-        desc.pFS = pFSUnlit;
-
-        desc.mCullMode = CULL_MODE_NONE;
-        desc.mFrontFace = FRONT_FACE_CW;
-
-        desc.mDepthTest = true;
-        desc.mDepthWrite = true;
-        desc.mDepthOp = COMPARE_GREATER;
-
-        desc.mDescriptorSetCount = 1;
-        desc.pDescriptorSets[0] = pDescriptorSetPerFrame;
-
-        addPipeline(&gRenderer, desc, &pPipelineUnlit);
-    }
-
     addScenePipelines(&gScene, &gRenderer);
 }
 
 void removePipelines()
 {
-    removePipeline(&gRenderer, &pPipelineUnlit);
     removeScenePipelines(&gScene, &gRenderer);
 }
 
@@ -223,39 +125,6 @@ void init()
     uiDesc.pRenderer = &gRenderer;
     uiDesc.mTargetFormat = FORMAT_RGBA8_UNORM;
     initUI(uiDesc, &gUI);
-
-    // Cube vertex/index buffer
-    {
-        VertexLayoutDesc layoutDesc = {};
-        layoutDesc.mCount = 2;
-        layoutDesc.mAttribs[0] = ATTRIBUTE_FLOAT3;
-        layoutDesc.mAttribs[1] = ATTRIBUTE_FLOAT2;
-        initVertexLayout(layoutDesc, &gCubeVertexLayout);
-
-        BufferDesc vbDesc = {};
-        vbDesc.mType = BUFFER_TYPE_VERTEX;
-        vbDesc.mSize = ARR_SIZE(cubeVertices);
-        vbDesc.mCount = ARR_LEN(cubeVertices);
-        vbDesc.mStride = sizeof(float);
-        addBuffer(&gRenderer, vbDesc, &pVBCube, cubeVertices);
-
-        BufferDesc ibDesc = {};
-        ibDesc.mType = BUFFER_TYPE_INDEX;
-        ibDesc.mSize = ARR_SIZE(cubeIndices);
-        ibDesc.mCount = ARR_LEN(cubeIndices);
-        ibDesc.mStride = sizeof(uint16);
-        addBuffer(&gRenderer, ibDesc, &pIBCube, cubeIndices);
-    }
-
-    // Cube texture
-    {
-        loadTexture(&gAssetManager, &gRenderer, 
-                str("../../res/textures/default_color.png"),
-                false, 
-                &pTexCube);
-        SamplerDesc desc = {};
-        addSampler(&gRenderer, desc, &pSamplerPoint);
-    }
 
     // Per frame uniform buffer
     {
@@ -306,11 +175,7 @@ void shutdown()
 
     removeSceneRenderResources(&gScene, &gRenderer);
 
-    removeSampler(&gRenderer, &pSamplerPoint);
-    removeTexture(&gRenderer, &pTexCube);
     removeBuffer(&gRenderer, &pUBPerFrame);
-    removeBuffer(&gRenderer, &pIBCube);
-    removeBuffer(&gRenderer, &pVBCube);
 
     destroyScene(&gScene);
 
