@@ -26,6 +26,7 @@ struct SceneNode
 
 #define SCENE_MAX_NODES 1024
 #define SCENE_MAX_MESHES SCENE_MAX_NODES
+#define SCENE_MAX_DRAWS 512
 struct Scene
 {
     Arena mArena = {};
@@ -49,6 +50,15 @@ struct Scene
 
     Buffer* pUBPerFrame = NULL;
     Buffer* pSBNodes = NULL;
+
+    Buffer* pDBDrawCmds = NULL;
+    Buffer* pSBDrawCmdCount = NULL;
+    Shader* pCSComputeDraws = NULL;
+    ComputePipeline* pPipeComputeDraws = NULL;  // TODO: CONTINUE setup draw indirect pass
+    // Idea: descriptor set binding design:
+    //      - Global set
+    //      - Per frame set
+    //      - Per draw set (maybe)
 
     VertexLayout mMeshVertexLayout;
     Shader* pVSGeometry = NULL;

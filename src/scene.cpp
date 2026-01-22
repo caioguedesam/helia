@@ -4,9 +4,9 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/file.hpp"
 #include "../dw/src/core/hash_map.hpp"
-#include "dw/src/render/buffer.hpp"
-#include "dw/src/render/descriptor.hpp"
-#include "dw/src/render/shader.hpp"
+#include "../dw/src/render/buffer.hpp"
+#include "../dw/src/render/descriptor.hpp"
+#include "../dw/src/render/shader.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -304,9 +304,12 @@ void addScenePipelines(Scene* pScene, Renderer* pRenderer)
         desc.mDescriptorSetCount = 1;
         desc.pDescriptorSets[0] = pScene->pDSScene;
 
+        // Constants:
+        // - Active frame (uint32)
+        // - Current node (uint32)
         desc.mConstantBlockCount = 1;
         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pRenderer, desc, &pScene->pPipeGeometry);
     }
@@ -353,6 +356,23 @@ void addSceneRenderResources(Scene* pScene, Renderer* pRenderer, AssetManager* p
         addBuffer(pRenderer, desc, &pScene->pSBNodes, &pScene->mNodes[0]);
     }
 
+    // GPU draw call buffers
+    {
+        BufferDesc desc = {};
+        desc.mType = BUFFER_TYPE_INDIRECT;
+        desc.mSize = sizeof(IndirectDraw) * SCENE_MAX_DRAWS;
+        desc.mCount = SCENE_MAX_DRAWS;
+        desc.mStride = sizeof(IndirectDraw);
+        addBuffer(pRenderer, desc, &pScene->pDBDrawCmds);
+
+        // TODO: Refactor this. This can be a single buffer with offsets.
+        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mSize = sizeof(uint32);
+        desc.mCount = 1;
+        desc.mStride = sizeof(uint32);
+        addBuffer(pRenderer, desc, &pScene->pSBDrawCmdCount);
+    }
+
     pScene->pUBPerFrame = pUBPerFrame;  // TODO: Refactor this
 
     // Reloadable resources
@@ -387,6 +407,8 @@ void removeSceneRenderResources(Scene* pScene, Renderer* pRenderer)
     removeSceneDescriptors(pScene, pRenderer);
     removeScenePipelines(pScene, pRenderer);
 
+    removeBuffer(pRenderer, &pScene->pSBDrawCmdCount);
+    removeBuffer(pRenderer, &pScene->pDBDrawCmds);
     removeBuffer(pRenderer, &pScene->pVBScene);
     removeBuffer(pRenderer, &pScene->pIBScene);
     removeBuffer(pRenderer, &pScene->pSBNodes);

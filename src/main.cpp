@@ -33,8 +33,8 @@ struct PerFrameUniforms
     m4f mView = {};
     m4f mProj = {};
 };
-PerFrameUniforms perFrameUniforms = {};
-Buffer* pUBPerFrame = NULL;     // TODO: This should be double buffered
+PerFrameUniforms perFrameUniforms[CONCURRENT_FRAMES];
+Buffer* pUBPerFrame = NULL;
 
 Camera gCamera = {};
 Timer gTimer = {};
@@ -130,7 +130,7 @@ void init()
     {
         BufferDesc desc = {};
         desc.mType = BUFFER_TYPE_UNIFORM;
-        desc.mSize = sizeof(PerFrameUniforms);
+        desc.mSize = sizeof(PerFrameUniforms) * 2;
         desc.mCount = 1;
         desc.mStride = sizeof(PerFrameUniforms);
         addBuffer(&gRenderer, desc, &pUBPerFrame);
@@ -186,11 +186,11 @@ void shutdown()
     destroyApp(&gApp);
 }
 
-void updatePerFrameUniforms()
+void updatePerFrameUniforms(Renderer* pRenderer)
 {
-    perFrameUniforms.mWorld = identity();
-    perFrameUniforms.mView = getView(&gCamera);
-    perFrameUniforms.mProj = getProj(&gCamera);
+    perFrameUniforms[pRenderer->mActiveFrame].mWorld = identity();
+    perFrameUniforms[pRenderer->mActiveFrame].mView = getView(&gCamera);
+    perFrameUniforms[pRenderer->mActiveFrame].mProj = getProj(&gCamera);
 }
 
 void update()
@@ -230,7 +230,7 @@ void update()
 
     updateCamera(&gCamera, gApp.mDt);
 
-    updatePerFrameUniforms();
+    updatePerFrameUniforms(&gRenderer);
 }
 
 void render()
@@ -250,7 +250,11 @@ void render()
     gpuTimerStart(&gpuTimerParams);
 
     // Upload per frame data
-    copyToBuffer(&gRenderer, pUBPerFrame, 0, &perFrameUniforms, sizeof(PerFrameUniforms));
+    copyToBuffer(&gRenderer, 
+            pUBPerFrame, 
+            sizeof(PerFrameUniforms) * gRenderer.mActiveFrame, 
+            &perFrameUniforms[gRenderer.mActiveFrame], 
+            sizeof(PerFrameUniforms));
     gpuTimestamp(str("Upload PerFrame"), &gpuTimerParams);
 
     // Scene geometry pass
@@ -280,7 +284,10 @@ void render()
 
         for(uint32 n = 0; n < gScene.mNodeCount; n++)
         {
-            cmdSetConstants(pCmd, gScene.pPipeGeometry, 0, sizeof(uint32), &n);
+            uint32 constants[2];
+            constants[0] = gRenderer.mActiveFrame;
+            constants[1] = n;
+            cmdSetConstants(pCmd, gScene.pPipeGeometry, 0, sizeof(uint32) * 2, &constants);
 
             SceneNode* pNode = &gScene.mNodes[n];
             Mesh* pMesh = &gScene.mMeshes[pNode->mMeshId];
