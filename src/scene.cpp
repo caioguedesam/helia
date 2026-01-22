@@ -4,9 +4,6 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/file.hpp"
 #include "../dw/src/core/hash_map.hpp"
-#include "../dw/src/render/buffer.hpp"
-#include "../dw/src/render/descriptor.hpp"
-#include "../dw/src/render/shader.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -179,8 +176,8 @@ void setupSceneModel(Scene* pScene, String modelPath)
             ASSERT(pAccPos);
             ASSERT(pAccPos->component_type == cgltf_component_type_r_32f);
 
-            Mesh mesh = {};
-            mesh.mVertexOffset = (uint32)(PTR_DIFF(pVertexOffset, pScene->pVertexData) / (12 * sizeof(float)));
+            SceneMesh mesh = {};
+            mesh.mVertexOffset = (int32)(PTR_DIFF(pVertexOffset, pScene->pVertexData) / (12 * sizeof(float)));
 
             for(cgltf_size v = 0; v < pAccPos->count; v++)
             {
@@ -250,166 +247,3 @@ void setupSceneModel(Scene* pScene, String modelPath)
     cgltf_free(pGltfData);
     ARENA_CHECKPOINT_RESET(&pScene->mTempArena, sceneModel);
 }
-
-// void addSceneShaders(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager)
-// {
-//     if(!pScene->pVSGeometry)
-//     {
-//         loadShader(pAssetManager, pRenderer, 
-//                 str("../../res/shaders/geometry.vert"), 
-//                 &pScene->pVSGeometry);
-//     }
-//     if(!pScene->pPSGeometry)
-//     {
-//         loadShader(pAssetManager, pRenderer, 
-//                 str("../../res/shaders/geometry.frag"), 
-//                 &pScene->pPSGeometry);
-//     }
-// }
-// 
-// void addSceneDescriptors(Scene* pScene, Renderer* pRenderer)
-// {
-//     // Scene global descriptor set
-//     if(!pScene->pDSScene)
-//     {
-//         DescriptorSetDesc desc = {};
-//         desc.mCount = 2;
-//         desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pScene->pUBPerFrame, 1 };
-//         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pScene->pSBNodes, 1 };
-//         addDescriptorSet(pRenderer, desc, &pScene->pDSScene);
-//     }
-// }
-// 
-// void addScenePipelines(Scene* pScene, Renderer* pRenderer)
-// {
-//     // Geometry pass pipeline
-//     if(!pScene->pPipeGeometry)
-//     {
-//         GraphicsPipelineDesc desc = {};
-//         desc.mRenderTargetCount = 1;
-//         desc.mRenderTargetFormats[0] = FORMAT_RGBA8_UNORM;
-//         desc.mDepthTargetFormat = FORMAT_D16_UNORM;
-// 
-//         desc.mVertexLayout = pScene->mMeshVertexLayout;
-//         desc.pVS = pScene->pVSGeometry;
-//         desc.pFS = pScene->pPSGeometry;
-// 
-//         desc.mCullMode = CULL_MODE_NONE;    // TODO(caio): Activate proper face culling
-//         desc.mFrontFace = FRONT_FACE_CW;
-// 
-//         desc.mDepthTest = true;
-//         desc.mDepthWrite = true;
-//         desc.mDepthOp = COMPARE_GREATER;
-// 
-//         desc.mDescriptorSetCount = 1;
-//         desc.pDescriptorSets[0] = pScene->pDSScene;
-// 
-//         // Constants:
-//         // - Active frame (uint32)
-//         // - Current node (uint32)
-//         desc.mConstantBlockCount = 1;
-//         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-//         desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
-// 
-//         addPipeline(pRenderer, desc, &pScene->pPipeGeometry);
-//     }
-// }
-// 
-// void addSceneRenderResources(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager,
-//         Buffer* pUBPerFrame)
-// {
-//     // Geometry vertex layout
-//     {
-//         VertexLayoutDesc desc = {};
-//         desc.mCount = 4;
-//         desc.mAttribs[0] = ATTRIBUTE_FLOAT3;
-//         desc.mAttribs[1] = ATTRIBUTE_FLOAT3;
-//         desc.mAttribs[2] = ATTRIBUTE_FLOAT2;
-//         desc.mAttribs[3] = ATTRIBUTE_FLOAT4;
-//         initVertexLayout(desc, &pScene->mMeshVertexLayout);
-//     }
-// 
-//     // Geometry vertex/index buffers
-//     {
-//         BufferDesc vbDesc = {};
-//         vbDesc.mType = BUFFER_TYPE_VERTEX;
-//         vbDesc.mSize = pScene->vertexCount * sizeof(float) * 12;
-//         vbDesc.mCount = pScene->vertexCount;
-//         vbDesc.mStride = sizeof(float);
-//         addBuffer(pRenderer, vbDesc, &pScene->pVBScene, pScene->pVertexData);
-// 
-//         BufferDesc ibDesc = {};
-//         ibDesc.mType = BUFFER_TYPE_INDEX;
-//         ibDesc.mSize = pScene->indexCount * sizeof(uint16);
-//         ibDesc.mCount = pScene->indexCount;
-//         ibDesc.mStride = sizeof(uint16);
-//         addBuffer(pRenderer, ibDesc, &pScene->pIBScene, pScene->pIndexData);
-//     }
-// 
-//     // Scene node buffer
-//     {
-//         BufferDesc desc = {};
-//         desc.mType = BUFFER_TYPE_STORAGE;
-//         desc.mSize = sizeof(SceneNode) * SCENE_MAX_NODES;
-//         desc.mCount = SCENE_MAX_NODES;
-//         desc.mStride = sizeof(SceneNode);
-//         addBuffer(pRenderer, desc, &pScene->pSBNodes, &pScene->mNodes[0]);
-//     }
-// 
-//     // GPU draw call buffers
-//     {
-//         BufferDesc desc = {};
-//         desc.mType = BUFFER_TYPE_INDIRECT;
-//         desc.mSize = sizeof(IndirectDraw) * SCENE_MAX_DRAWS;
-//         desc.mCount = SCENE_MAX_DRAWS;
-//         desc.mStride = sizeof(IndirectDraw);
-//         addBuffer(pRenderer, desc, &pScene->pDBDrawCmds);
-// 
-//         // TODO: Refactor this. This can be a single buffer with offsets.
-//         desc.mType = BUFFER_TYPE_STORAGE;
-//         desc.mSize = sizeof(uint32);
-//         desc.mCount = 1;
-//         desc.mStride = sizeof(uint32);
-//         addBuffer(pRenderer, desc, &pScene->pSBDrawCmdCount);
-//     }
-// 
-//     pScene->pUBPerFrame = pUBPerFrame;  // TODO: Refactor this
-// 
-//     // Reloadable resources
-//     addSceneShaders(pScene, pRenderer, pAssetManager);
-//     addSceneDescriptors(pScene, pRenderer);
-//     addScenePipelines(pScene, pRenderer);
-// }
-// 
-// void removeSceneShaders(Scene *pScene, Renderer *pRenderer)
-// {
-//     if(pScene->pVSGeometry)
-//         removeShader(pRenderer, &pScene->pVSGeometry);
-//     if(pScene->pPSGeometry)
-//         removeShader(pRenderer, &pScene->pPSGeometry);
-// }
-// 
-// void removeSceneDescriptors(Scene *pScene, Renderer *pRenderer)
-// {
-//     if(pScene->pDSScene)
-//         removeDescriptorSet(pRenderer, &pScene->pDSScene);
-// }
-// 
-// void removeScenePipelines(Scene *pScene, Renderer *pRenderer)
-// {
-//     if(pScene->pPipeGeometry)
-//         removePipeline(pRenderer, &pScene->pPipeGeometry);
-// }
-// 
-// void removeSceneRenderResources(Scene* pScene, Renderer* pRenderer)
-// {
-//     removeSceneShaders(pScene, pRenderer);
-//     removeSceneDescriptors(pScene, pRenderer);
-//     removeScenePipelines(pScene, pRenderer);
-// 
-//     removeBuffer(pRenderer, &pScene->pSBDrawCmdCount);
-//     removeBuffer(pRenderer, &pScene->pDBDrawCmds);
-//     removeBuffer(pRenderer, &pScene->pVBScene);
-//     removeBuffer(pRenderer, &pScene->pIBScene);
-//     removeBuffer(pRenderer, &pScene->pSBNodes);
-// }

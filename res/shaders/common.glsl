@@ -2,6 +2,7 @@
 
 struct SceneMesh
 {
+    int mVertexOffset;
     uint mIndexStart;
     uint mIndexCount;
 };
@@ -18,4 +19,13 @@ struct PerFrameUniforms
     mat4 mWorld;
     mat4 mView;
     mat4 mProj;
+};
+
+struct IndirectDraw
+{
+    uint  mIndexCount;
+    uint  mInstanceCount;
+    uint  mFirstIndex;
+    int   mVertexOffset;
+    uint  mFirstInstance;
 };

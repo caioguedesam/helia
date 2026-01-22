@@ -3,9 +3,9 @@
 #include "../dw/src/core/string.hpp"
 #include "../dw/src/math/math.hpp"
 
-struct Mesh
+struct SceneMesh
 {
-    uint32 mVertexOffset    = 0;
+    int32 mVertexOffset     = 0;
     uint32 mIndexOffset     = 0;
     uint32 mIndexCount      = 0;
     // TODO(caio): Add material data
@@ -29,7 +29,7 @@ struct Scene
     Arena mTempArena = {};
 
     // Scene elements and data
-    Mesh mMeshes[SCENE_MAX_MESHES];
+    SceneMesh mMeshes[SCENE_MAX_MESHES];
     SceneNode mNodes[SCENE_MAX_NODES];
     uint32 mMeshCount = 0;
     uint32 mNodeCount = 0;

@@ -31,6 +31,7 @@ struct SceneRenderer
     Buffer* pVBSceneGeometry = NULL;
     Buffer* pIBSceneGeometry = NULL;
     Buffer* pSBSceneNodes = NULL;
+    Buffer* pSBSceneMeshes = NULL;
     Buffer* pUBPerFrame = NULL;
     
     Buffer* pDBDrawCmds = NULL;
@@ -41,7 +42,8 @@ struct SceneRenderer
     DescriptorSet* pDSSceneGeometry = NULL;
 
     // Draw call buffer pass
-    ComputePipeline* pPipeComputeDraws = NULL;
+    Shader* pCSGenerateDraws = NULL;
+    ComputePipeline* pPipeGenerateDraws = NULL;
 
     // GBuffer draw pass
     RenderTarget* pRTSceneGeometryColor = NULL;

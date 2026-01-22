@@ -42,7 +42,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         addBuffer(pRenderer, ibDesc, &pSceneRenderer->pIBSceneGeometry, pScene->pIndexData);
     }
 
-    // Scene node buffer
+    // Scene nodes/meshes buffers
     {
         BufferDesc desc = {};
         desc.mType = BUFFER_TYPE_STORAGE;
@@ -50,6 +50,12 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         desc.mCount = SCENE_MAX_NODES;
         desc.mStride = sizeof(SceneNode);
         addBuffer(pRenderer, desc, &pSceneRenderer->pSBSceneNodes, &pScene->mNodes[0]);
+
+        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mSize = sizeof(SceneMesh) * SCENE_MAX_MESHES;
+        desc.mCount = SCENE_MAX_MESHES;
+        desc.mStride = sizeof(SceneMesh);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBSceneMeshes, &pScene->mMeshes[0]);
     }
 
     // GPU draw call buffers
@@ -106,6 +112,7 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmds);
     removeBuffer(pRenderer, &pSceneRenderer->pVBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pIBSceneGeometry);
+    removeBuffer(pRenderer, &pSceneRenderer->pSBSceneMeshes);
     removeBuffer(pRenderer, &pSceneRenderer->pSBSceneNodes);
 
     *pSceneRenderer = {};
@@ -136,11 +143,19 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
                 str("../../res/shaders/geometry.vert"), 
                 &pSceneRenderer->pVSSceneGeometry);
     }
+
     if(!pSceneRenderer->pPSSceneGeometry)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
                 str("../../res/shaders/geometry.frag"), 
                 &pSceneRenderer->pPSSceneGeometry);
+    }
+
+    if(!pSceneRenderer->pCSGenerateDraws)
+    {
+        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                str("../../res/shaders/generate_draws.comp"), 
+                &pSceneRenderer->pCSGenerateDraws);
     }
 }
 
@@ -150,8 +165,11 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     if(!pSceneRenderer->pDSSceneGeometry)
     {
         DescriptorSetDesc desc = {};
-        desc.mCount = 1;
+        desc.mCount = 4;
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
+        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
+        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmds, 1 };
+        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBDrawCmdCount, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSSceneGeometry);
     }
 
@@ -199,6 +217,25 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeSceneGeometry);
     }
+
+    if(!pSceneRenderer->pPipeGenerateDraws)
+    {
+        ComputePipelineDesc desc = {};
+
+        desc.pCS = pSceneRenderer->pCSGenerateDraws;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSSceneGeometry;
+
+        // Constants:
+        // - Total node count (uint32)
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_COMP;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+
+        addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDraws);
+    }
 }
 
 void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
@@ -213,6 +250,8 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSSceneGeometry);
     if(pSceneRenderer->pPSSceneGeometry)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSSceneGeometry);
+    if(pSceneRenderer->pCSGenerateDraws)
+        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pCSGenerateDraws);
 }
 
 void removeSceneDescriptors(SceneRenderer* pSceneRenderer)
@@ -227,6 +266,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
 {
     if(pSceneRenderer->pPipeSceneGeometry)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeSceneGeometry);
+    if(pSceneRenderer->pPipeGenerateDraws)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
 }
 
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
@@ -269,7 +310,29 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     uploadPerFrameUniforms(pSceneRenderer);
     gpuTimestamp(str("Upload PerFrame"), &gpuTimerParams);
 
-    // Scene geometry pass
+    // Generate draws compute pass
+    {
+        ComputePipeline* pPipeline = pSceneRenderer->pPipeGenerateDraws;
+
+        cmdBindComputePipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSSceneGeometry, 1);
+
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &pSceneRenderer->pScene->mNodeCount);
+
+        uint32 size = (uint32)sqrtf(SCENE_MAX_NODES);
+        uint32 localSize = 8;
+        cmdDispatch(pCmd, size / localSize, size / localSize, 1);
+
+        Barrier barrier = {};
+        barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
+        barrier.mDstStage = PIPELINE_STAGE_DRAW_INDIRECT;
+        barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
+        barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
+        cmdBarrier(pCmd, 1, &barrier);
+    }
+
+    // Scene geometry render pass
     {
         RenderTarget* pRTColor = pSceneRenderer->pRTSceneGeometryColor;
         RenderTarget* pRTDepth = pSceneRenderer->pRTSceneGeometryDepth;
@@ -286,9 +349,9 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
         cmdBindRenderTargets(pCmd, bindDesc);
 
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
         cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
         cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSSceneGeometry, 1);
-        cmdBindGraphicsPipeline(pCmd, pPipeline);
 
         cmdSetViewport(pCmd, pRTColor);
         cmdSetScissor(pCmd, pRTColor);
@@ -305,7 +368,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
             cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32) * 2, &constants);
 
             SceneNode* pNode = &pScene->mNodes[n];
-            Mesh* pMesh = &pScene->mMeshes[pNode->mMeshId];
+            SceneMesh* pMesh = &pScene->mMeshes[pNode->mMeshId];
             cmdDrawIndexed(pCmd, 
                     pMesh->mIndexCount, 
                     1, 
