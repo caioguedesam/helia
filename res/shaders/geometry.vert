@@ -11,7 +11,7 @@ DEFINE_UNIFORM_BLOCK(0, 0)
     PerFrameUniforms perFrameUniforms[2];
 };
 
-DEFINE_STORAGE_BLOCK(0, 1)
+DEFINE_STORAGE_BLOCK(1, 0)
 {
     SceneNode sceneNodes[];
 };

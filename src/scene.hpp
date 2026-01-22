@@ -2,10 +2,6 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/string.hpp"
 #include "../dw/src/math/math.hpp"
-#include "../dw/src/render/buffer.hpp"
-#include "../dw/src/render/shader.hpp"
-#include "../dw/src/render/render.hpp"
-#include "../dw/src/asset/asset.hpp"
 
 struct Mesh
 {
@@ -42,44 +38,9 @@ struct Scene
     void* pIndexData = NULL;
     uint64 vertexCount = 0;
     uint64 indexCount = 0;
-
-    // Scene render resources
-    // All GLTF vertices/indices sit in a single buffer.
-    Buffer* pVBScene = NULL;
-    Buffer* pIBScene = NULL;
-
-    Buffer* pUBPerFrame = NULL;
-    Buffer* pSBNodes = NULL;
-
-    Buffer* pDBDrawCmds = NULL;
-    Buffer* pSBDrawCmdCount = NULL;
-    Shader* pCSComputeDraws = NULL;
-    ComputePipeline* pPipeComputeDraws = NULL;  // TODO: CONTINUE setup draw indirect pass
-    // Idea: descriptor set binding design:
-    //      - Global set
-    //      - Per frame set
-    //      - Per draw set (maybe)
-
-    VertexLayout mMeshVertexLayout;
-    Shader* pVSGeometry = NULL;
-    Shader* pPSGeometry = NULL;
-    GraphicsPipeline* pPipeGeometry = NULL;
-
-    DescriptorSet* pDSScene = NULL;
 };
 
 void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize);
 void destroyScene(Scene* pScene);
 
 void setupSceneModel(Scene* pScene, String modelPath);
-
-void addSceneShaders(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager);
-void addSceneDescriptors(Scene* pScene, Renderer* pRenderer);
-void addScenePipelines(Scene* pScene, Renderer* pRenderer);
-void addSceneRenderResources(Scene* pScene, Renderer* pRenderer, AssetManager* pAssetManager,
-        Buffer* pUBPerFrame);
-
-void removeSceneShaders(Scene* pScene, Renderer* pRenderer);
-void removeSceneDescriptors(Scene* pScene, Renderer* pRenderer);
-void removeScenePipelines(Scene* pScene, Renderer* pRenderer);
-void removeSceneRenderResources(Scene* pScene, Renderer* pRenderer);
