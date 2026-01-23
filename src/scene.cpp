@@ -90,7 +90,7 @@ int32 getAccessorBufferIndex(cgltf_accessor* pAccessor, cgltf_data* pGltfData)
     return -1;
 }
 
-void setupSceneModel(Scene* pScene, String modelPath)
+void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32* pTexCount)
 {
     // Load model asset to scratch memory
     ARENA_CHECKPOINT_SET(&pScene->mTempArena, sceneModel);
@@ -112,6 +112,40 @@ void setupSceneModel(Scene* pScene, String modelPath)
 
     result = cgltf_validate(pGltfData);
     ASSERT(result == cgltf_result_success);
+
+    // Save texture indices in array so we can load them later
+    // TODO(caio): Samplers
+    for(cgltf_size t = 0; t < pGltfData->textures_count; t++)
+    {
+        cgltf_image* pTexImage = pGltfData->textures[t].image;
+        pTexPaths[t] = str(pTexImage->uri);
+    }
+    *pTexCount = pGltfData->textures_count;
+
+    // Create all scene materials
+    for(cgltf_size m = 0; m < pGltfData->materials_count; m++)
+    {
+        cgltf_material* pMat = &pGltfData->materials[m];
+        ASSERT(pMat->has_pbr_metallic_roughness);
+        cgltf_pbr_metallic_roughness* pPBR = &pMat->pbr_metallic_roughness;
+
+        SceneMaterial mat = {};
+        mat.mBaseColor = to4f(pPBR->base_color_factor);
+        mat.mRoughness = pPBR->roughness_factor;
+        mat.mMetallic = pPBR->metallic_factor;
+
+        mat.mBaseColorTexture = cgltf_texture_index(pGltfData, pPBR->base_color_texture.texture);
+        if(pPBR->metallic_roughness_texture.texture)
+        {
+            mat.mMetallicRoughnessTexture = cgltf_texture_index(pGltfData, pPBR->metallic_roughness_texture.texture);
+        }
+        if(pMat->normal_texture.texture)
+        {
+            mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture);
+        }
+
+        pScene->mMaterials[pScene->mMaterialCount++] = mat;
+    }
 
     // For every primitive within every mesh, read vertices and indices,
     // then append to appropriate buffers.
@@ -207,7 +241,6 @@ void setupSceneModel(Scene* pScene, String modelPath)
             cgltf_accessor* pAccIndices = pPrimitive->indices;
             ASSERT(pAccIndices->component_type == cgltf_component_type_r_16u);
             
-            //Mesh mesh = {};
             mesh.mIndexOffset = (uint32)(PTR_DIFF(pIndexOffset, pScene->pIndexData) / sizeof(uint16));
             mesh.mIndexCount = (uint32)(pAccIndices->count);
 
@@ -235,10 +268,15 @@ void setupSceneModel(Scene* pScene, String modelPath)
         for(cgltf_size p = 0; p < pNode->mesh->primitives_count; p++)
         {
             cgltf_primitive* pPrimitive = &pNode->mesh->primitives[p];
-            uint32 midx = sceneMeshByPrimitive[pPrimitive];
+            uint32 meshIdx = sceneMeshByPrimitive[pPrimitive];
+
+            uint32 materialIdx = MAX_UINT32;
+            ASSERT(pPrimitive->material);
+            materialIdx = (uint32)cgltf_material_index(pGltfData, pPrimitive->material);
+
             m4f transform;
             cgltf_node_transform_world(pNode, &transform.mData[0]);
-            SceneNode sceneNode = { transform, midx };
+            SceneNode sceneNode = { transform, meshIdx, materialIdx };
             pScene->mNodes[pScene->mNodeCount++] = sceneNode;
         }
     }

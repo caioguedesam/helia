@@ -11,7 +11,19 @@ struct SceneNode
 {
     mat4 mTransform;
     uint mMeshId;
-    STRUCT_PADDING_UINT(0, 3);
+    uint mMaterialId;
+    STRUCT_PADDING_UINT(0, 2);
+};
+
+struct SceneMaterial
+{
+    vec4 mBaseColor;
+    float mMetallic;
+    float mRoughness;
+
+    uint mBaseColorTexId;
+    uint mNormalTexId;
+    uint mMetallicRoughnessTexId;
 };
 
 struct PerFrameUniforms

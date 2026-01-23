@@ -14,6 +14,7 @@ struct PerFrameUniforms
     m4f mProj = {};
 };
 
+#define SCENE_RENDERER_MAX_TEXTURES 1024
 struct SceneRenderer
 {
     // References
@@ -33,6 +34,9 @@ struct SceneRenderer
     Buffer* pSBSceneNodes = NULL;
     Buffer* pSBSceneMeshes = NULL;
     Buffer* pUBPerFrame = NULL;
+
+    Texture* pTexScene[SCENE_RENDERER_MAX_TEXTURES];
+    uint32 texCount = 0;
     
     Buffer* pDBDrawCmds = NULL;
     Buffer* pDBDrawCmdCount = NULL;
@@ -56,7 +60,8 @@ struct SceneRenderer
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
-        Scene* pScene);
+        Scene* pScene, 
+        String rootPath, String* pTexPaths, uint32 texCount);
 void destroySceneRenderer(SceneRenderer* pSceneRenderer);
 
 void addSceneRenderTargets(SceneRenderer* pSceneRenderer);

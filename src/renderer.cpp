@@ -1,18 +1,38 @@
 #include "renderer.hpp"
+#include "../dw/src/core/profile.hpp"
+#include "../dw/src/asset/asset.hpp"
 #include "../dw/src/render/render.hpp"
 #include "../dw/src/render/ui.hpp"
-#include "../dw/src/core/profile.hpp"
+#include "../dw/src/render/texture.hpp"
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
-        Scene* pScene)
+        Scene* pScene, 
+        String rootPath, String* pTexPaths, uint32 texCount)
 {
+    PROFILE_SCOPE;
+
     ASSERT(pSceneRenderer);
     ASSERT(pApp && pRenderer && pAssetManager && pScene);
     pSceneRenderer->pApp = pApp;
     pSceneRenderer->pRenderer = pRenderer;
     pSceneRenderer->pAssetManager = pAssetManager;
     pSceneRenderer->pScene = pScene;
+
+    // Load textures from scene model
+    {
+        PROFILE_SCOPE_NAME("initSceneRenderer::Load Textures");
+        pSceneRenderer->texCount = texCount;
+        for(uint32 t = 0; t < texCount; t++)
+        {
+            PROFILE_SCOPE_NAME("initSceneRenderer::Load Texture");
+            Texture* pTex = NULL;
+            char buf[256];
+            String texPath = strf(buf, "%.*s/%.*s", STRF_ARG(rootPath), STRF_ARG(pTexPaths[t]));
+            loadTexture(pAssetManager, pRenderer, texPath, false, &pTex);
+            pSceneRenderer->pTexScene[t] = pTex;
+        }
+    }
 
     // Geometry vertex layout
     {
@@ -107,6 +127,12 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
     destroyGpuTimer(&pSceneRenderer->mGpuTimer);
 
     Renderer* pRenderer = pSceneRenderer->pRenderer;
+
+    for(uint32 t = 0; t < pSceneRenderer->texCount; t++)
+    {
+        removeTexture(pRenderer, &pSceneRenderer->pTexScene[t]);
+    }
+
     removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdCount);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmds);

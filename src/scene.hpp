@@ -8,20 +8,32 @@ struct SceneMesh
     int32 mVertexOffset     = 0;
     uint32 mIndexOffset     = 0;
     uint32 mIndexCount      = 0;
-    // TODO(caio): Add material data
+};
+
+struct SceneMaterial
+{
+    v4f     mBaseColor = {1,1,1,1};
+    float   mMetallic = 0.f;
+    float   mRoughness = 1.f;
+
+    uint32  mBaseColorTexture           = MAX_UINT16;
+    uint32  mNormalTexture              = MAX_UINT16;
+    uint32  mMetallicRoughnessTexture   = MAX_UINT16;
+    // TODO(caio): Emissive, occlusion, other stuff
 };
 
 struct SceneNode
 {
     m4f mTransform      = identity();   // World-space transform
     uint32 mMeshId      = MAX_UINT32;   // Index for this node's mesh in the scene
-    // TODO(caio): Add parent/child hierarchy?
+    uint32 mMaterialId  = MAX_UINT32;
 
-    uint32 mPadding0[3];
+    uint32 mPadding0[2];
 };
 
 #define SCENE_MAX_NODES 1024
 #define SCENE_MAX_MESHES SCENE_MAX_NODES
+#define SCENE_MAX_MATERIALS SCENE_MAX_NODES
 #define SCENE_MAX_DRAWS 512
 struct Scene
 {
@@ -31,8 +43,10 @@ struct Scene
     // Scene elements and data
     SceneMesh mMeshes[SCENE_MAX_MESHES];
     SceneNode mNodes[SCENE_MAX_NODES];
-    uint32 mMeshCount = 0;
-    uint32 mNodeCount = 0;
+    SceneMaterial mMaterials[SCENE_MAX_MATERIALS];
+    uint32 mMeshCount       = 0;
+    uint32 mNodeCount       = 0;
+    uint32 mMaterialCount   = 0;
 
     void* pVertexData = NULL;
     void* pIndexData = NULL;
@@ -43,4 +57,4 @@ struct Scene
 void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize);
 void destroyScene(Scene* pScene);
 
-void setupSceneModel(Scene* pScene, String modelPath);
+void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32* pTexCount);

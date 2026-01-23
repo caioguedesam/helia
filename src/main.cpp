@@ -90,8 +90,12 @@ void init()
 
     // Helia
     initScene(&gScene, MB(512), MB(128));
-    setupSceneModel(&gScene, str("../../res/models/sponza/glTF/Sponza.gltf"));
-    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gScene);
+    String texPaths[SCENE_RENDERER_MAX_TEXTURES];
+    uint32 texCount = 0;
+    String modelPath = str("../../res/models/sponza/glTF/Sponza.gltf");
+    setupSceneModel(&gScene, modelPath, texPaths, &texCount);
+    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gScene, 
+            getFileDir(modelPath), texPaths, texCount);
 
     addRenderTargets();
     addShaders();
