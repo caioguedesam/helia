@@ -1,7 +1,7 @@
 #version 460 core
 #include "common.glsl"
 
-layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
 DEFINE_UNIFORM_BLOCK(0, 0)
 {
@@ -33,18 +33,9 @@ DEFINE_CONSTANT_BLOCK
     uint nodeCount;
 };
 
-uint GetThreadGlobalId()
-{
-    uvec3 globalSize = gl_NumWorkGroups * gl_WorkGroupSize;
-    return
-        gl_GlobalInvocationID.x +
-        gl_GlobalInvocationID.y * globalSize.x +
-        gl_GlobalInvocationID.z * globalSize.x * globalSize.y;
-}
-
 void main()
 {
-    uint idx = GetThreadGlobalId();
+    uint idx = gl_GlobalInvocationID.x;
     if(idx >= nodeCount)
     {
         return;
@@ -53,9 +44,6 @@ void main()
     SceneNode node = sceneNodes[idx];
     SceneMesh mesh = sceneMeshes[node.mMeshId];
 
-    drawCmdCount = 0;
-    barrier();  // TODO(caio): Is this needed?
-    
     uint drawIdx = atomicAdd(drawCmdCount, 1);
     drawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
     drawCmds[drawIdx].mInstanceCount = 1;

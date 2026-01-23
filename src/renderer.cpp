@@ -68,11 +68,11 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmds);
 
         // TODO: Refactor this. This can be a single buffer with offsets.
-        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mType = BUFFER_TYPE_INDIRECT;
         desc.mSize = sizeof(uint32);
         desc.mCount = 1;
         desc.mStride = sizeof(uint32);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pSBDrawCmdCount);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmdCount);
     }
 
     // Per frame data uniform buffer
@@ -108,7 +108,7 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
 
     Renderer* pRenderer = pSceneRenderer->pRenderer;
     removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame);
-    removeBuffer(pRenderer, &pSceneRenderer->pSBDrawCmdCount);
+    removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdCount);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmds);
     removeBuffer(pRenderer, &pSceneRenderer->pVBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pIBSceneGeometry);
@@ -169,7 +169,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
         desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmds, 1 };
-        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBDrawCmdCount, 1 };
+        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdCount, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSSceneGeometry);
     }
 
@@ -320,9 +320,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &pSceneRenderer->pScene->mNodeCount);
 
-        uint32 size = (uint32)sqrtf(SCENE_MAX_NODES);
-        uint32 localSize = 8;
-        cmdDispatch(pCmd, size / localSize, size / localSize, 1);
+        cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
+        cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
 
         Barrier barrier = {};
         barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
@@ -359,22 +358,16 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
 
-        Scene* pScene = pSceneRenderer->pScene;
-        for(uint32 n = 0; n < pScene->mNodeCount; n++)
-        {
-            uint32 constants[2];
-            constants[0] = pRenderer->mActiveFrame;
-            constants[1] = n;
-            cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32) * 2, &constants);
 
-            SceneNode* pNode = &pScene->mNodes[n];
-            SceneMesh* pMesh = &pScene->mMeshes[pNode->mMeshId];
-            cmdDrawIndexed(pCmd, 
-                    pMesh->mIndexCount, 
-                    1, 
-                    pMesh->mIndexOffset, 
-                    pMesh->mVertexOffset);
-        }
+        uint32 constants[2];
+        constants[0] = pRenderer->mActiveFrame;
+        constants[1] = 0;   // TODO(caio): Remove dead code
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32) * 2, &constants);
+
+        cmdDrawIndexedIndirect(pCmd, 
+                pSceneRenderer->pDBDrawCmds, 
+                pSceneRenderer->pDBDrawCmdCount, 
+                SCENE_MAX_DRAWS);
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("Unlit Pass"), &gpuTimerParams);

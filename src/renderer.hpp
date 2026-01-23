@@ -35,7 +35,7 @@ struct SceneRenderer
     Buffer* pUBPerFrame = NULL;
     
     Buffer* pDBDrawCmds = NULL;
-    Buffer* pSBDrawCmdCount = NULL;
+    Buffer* pDBDrawCmdCount = NULL;
 
     // Descriptor sets
     DescriptorSet* pDSPerFrame = NULL;

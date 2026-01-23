@@ -24,7 +24,8 @@ DEFINE_CONSTANT_BLOCK
 
 void main()
 {
-    SceneNode node = sceneNodes[nodeId];
+    uint idx = gl_DrawID;
+    SceneNode node = sceneNodes[idx];
     //gl_Position = perFrame.mProj * perFrame.mView * perFrame.mWorld * vec4(viPosition, 1.0f);
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * node.mTransform * vec4(inPosition, 1.0f);
