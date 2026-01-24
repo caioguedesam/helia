@@ -131,8 +131,8 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     float aspect = getAspectRatio(pApp);
     camDesc.mFovY = fovHtoV(fovX, aspect);
     camDesc.mAspect = aspect;
-    camDesc.mNear = 0.01f;
-    camDesc.mFar = 1000.f;
+    camDesc.mNear = 0.001f;
+    camDesc.mFar = 100.f;
     initCamera(
             {0,0,-5}, 
             {0,0,0}, 
@@ -178,7 +178,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneGeometryColor);
 
-        desc.mFormat = FORMAT_D16_UNORM;
+        desc.mFormat = FORMAT_D32_FLOAT;
         desc.mClear.mDepth = 0;
         addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneGeometryDepth);
     }
