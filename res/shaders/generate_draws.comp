@@ -18,13 +18,26 @@ void main()
 
     SceneNode node = sceneNodes[idx];
     SceneMesh mesh = sceneMeshes[node.mMeshId];
+    SceneMaterial mat = sceneMaterials[node.mMaterialId];
 
-    uint drawIdx = atomicAdd(drawCmdCount, 1);
-    drawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
-    drawCmds[drawIdx].mInstanceCount = 1;
-    drawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
-    drawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
-    drawCmds[drawIdx].mFirstInstance = 0;
-
-    perDraw[drawIdx].mNodeId = idx;
+    if(mat.mDoubleSided == 1)
+    {
+        uint drawIdx = atomicAdd(doubleSidedOpaqueDrawCount, 1);
+        doubleSidedOpaqueDrawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
+        doubleSidedOpaqueDrawCmds[drawIdx].mInstanceCount = 1;
+        doubleSidedOpaqueDrawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
+        doubleSidedOpaqueDrawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
+        doubleSidedOpaqueDrawCmds[drawIdx].mFirstInstance = 0;
+        perDraw[drawIdx].mNodeIdOpaqueDoubleSided = idx;
+    }
+    else
+    {
+        uint drawIdx = atomicAdd(opaqueDrawCount, 1);
+        opaqueDrawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
+        opaqueDrawCmds[drawIdx].mInstanceCount = 1;
+        opaqueDrawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
+        opaqueDrawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
+        opaqueDrawCmds[drawIdx].mFirstInstance = 0;
+        perDraw[drawIdx].mNodeIdOpaque = idx;
+    }
 }

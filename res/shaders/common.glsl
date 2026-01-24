@@ -25,8 +25,11 @@ struct SceneMaterial
     uint mBaseColorTexId;
     uint mNormalTexId;
     uint mMetallicRoughnessTexId;
+
+    float mAlphaCutoff;
+    uint mDoubleSided;
     
-    STRUCT_PADDING_UINT(0, 3);
+    STRUCT_PADDING_UINT(0, 1);
 };
 
 struct PerFrameUniforms
@@ -38,7 +41,8 @@ struct PerFrameUniforms
 
 struct PerDrawData
 {
-    uint mNodeId;
+    uint mNodeIdOpaque;
+    uint mNodeIdOpaqueDoubleSided;
 };
 
 struct IndirectDraw
@@ -60,34 +64,40 @@ DEFINE_UNIFORM_BLOCK(0, 0)
 // 1 -> Scene Resources
 DEFINE_STORAGE_BLOCK(1, 0)
 {
-    IndirectDraw drawCmds[];
+    IndirectDraw opaqueDrawCmds[];
 };
 
 DEFINE_STORAGE_BLOCK(1, 1)
 {
-    uint drawCmdCount;
+    IndirectDraw doubleSidedOpaqueDrawCmds[];
 };
 
 DEFINE_STORAGE_BLOCK(1, 2)
 {
-    PerDrawData perDraw[];
+    uint opaqueDrawCount;
+    uint doubleSidedOpaqueDrawCount;
 };
 
 DEFINE_STORAGE_BLOCK(1, 3)
 {
-    SceneNode sceneNodes[];
+    PerDrawData perDraw[];
 };
 
 DEFINE_STORAGE_BLOCK(1, 4)
 {
-    SceneMesh sceneMeshes[];
+    SceneNode sceneNodes[];
 };
 
 DEFINE_STORAGE_BLOCK(1, 5)
+{
+    SceneMesh sceneMeshes[];
+};
+
+DEFINE_STORAGE_BLOCK(1, 6)
 {
     SceneMaterial sceneMaterials[];
 };
 
 #define SCENE_MAX_TEXTURES 1024
-DEFINE_TEXTURE2D(1, 6) materialMaps[SCENE_MAX_TEXTURES];
-DEFINE_SAMPLER(1, 7) samplerLinear;
+DEFINE_TEXTURE2D(1, 7) materialMaps[SCENE_MAX_TEXTURES];
+DEFINE_SAMPLER(1, 8) samplerLinear;

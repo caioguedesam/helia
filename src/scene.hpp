@@ -10,18 +10,26 @@ struct SceneMesh
     uint32 mIndexCount      = 0;
 };
 
+#define SCENE_MAX_TEXTURES 1024
+#define FALLBACK_BASECOLOR_INDEX 0
+#define FALLBACK_NORMAL_INDEX 1
+#define FALLBACK_MRS_INDEX 2
+#define FALLBACK_TEXTURE_COUNT 3
 struct SceneMaterial
 {
     v4f     mBaseColor = {1,1,1,1};
     float   mMetallic = 0.f;
     float   mRoughness = 1.f;
 
-    uint32  mBaseColorTexture           = MAX_UINT16;
-    uint32  mNormalTexture              = MAX_UINT16;
-    uint32  mMetallicRoughnessTexture   = MAX_UINT16;
+    uint32  mBaseColorTexture           = FALLBACK_BASECOLOR_INDEX;
+    uint32  mNormalTexture              = FALLBACK_NORMAL_INDEX;
+    uint32  mMetallicRoughnessTexture   = FALLBACK_MRS_INDEX;
     // TODO(caio): Emissive, occlusion, other stuff
 
-    uint32 mPadding0[3];
+    float   mAlphaCutoff = 0.f;
+    uint32  mDoubleSided = 1;
+
+    uint32  mPadding0[1];
 };
 
 struct SceneNode

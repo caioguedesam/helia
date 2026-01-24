@@ -18,8 +18,9 @@ void main()
 {
     outUV = inUV;
 
+    // TODO(caio): Flip normals based on gl_FrontFace
     PerDrawData drawData = perDraw[gl_DrawID];
-    outNodeId = drawData.mNodeIdOpaque;
+    outNodeId = drawData.mNodeIdOpaqueDoubleSided;
     SceneNode node = sceneNodes[outNodeId];
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * node.mTransform * vec4(inPosition, 1.0f);

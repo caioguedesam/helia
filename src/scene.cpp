@@ -134,15 +134,28 @@ void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32*
         mat.mRoughness = pPBR->roughness_factor;
         mat.mMetallic = pPBR->metallic_factor;
 
-        mat.mBaseColorTexture = cgltf_texture_index(pGltfData, pPBR->base_color_texture.texture);
+        mat.mBaseColorTexture = FALLBACK_BASECOLOR_INDEX;
+        mat.mNormalTexture = FALLBACK_NORMAL_INDEX;
+        mat.mMetallicRoughnessTexture = FALLBACK_MRS_INDEX;
+
+        if(pPBR->base_color_texture.texture)
+        {
+            mat.mBaseColorTexture = cgltf_texture_index(pGltfData, pPBR->base_color_texture.texture) + FALLBACK_TEXTURE_COUNT;
+        }
         if(pPBR->metallic_roughness_texture.texture)
         {
-            mat.mMetallicRoughnessTexture = cgltf_texture_index(pGltfData, pPBR->metallic_roughness_texture.texture);
+            mat.mMetallicRoughnessTexture = cgltf_texture_index(pGltfData, pPBR->metallic_roughness_texture.texture) + FALLBACK_TEXTURE_COUNT;
         }
         if(pMat->normal_texture.texture)
         {
-            mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture);
+            mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture) + FALLBACK_TEXTURE_COUNT;
         }
+        if(pMat->alpha_mode != cgltf_alpha_mode_opaque)
+        {
+            ASSERT(pMat->alpha_mode == cgltf_alpha_mode_mask);  // TODO(caio): Support alpha blending
+            mat.mAlphaCutoff = pMat->alpha_cutoff;
+        }
+        mat.mDoubleSided = (uint32)pMat->double_sided;
 
         pScene->mMaterials[pScene->mMaterialCount++] = mat;
     }

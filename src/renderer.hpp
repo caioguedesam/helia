@@ -16,10 +16,10 @@ struct PerFrameUniforms
 
 struct PerDrawData
 {
-    uint32 mNodeId = MAX_UINT32;
+    uint32 mNodeIdOpaque = MAX_UINT32;
+    uint32 mNodeIdDoubleSided = MAX_UINT32;
 };
 
-#define SCENE_MAX_TEXTURES 1024
 struct SceneRenderer
 {
     // References
@@ -45,7 +45,12 @@ struct SceneRenderer
     uint32 mMaterialMapCount = 0;
     Sampler* pSamplerLinear = NULL;
     
-    Buffer* pDBDrawCmds = NULL;
+    // Draw call buffers
+    // Passes:
+    // - Opaque objects
+    // - Double-sided opaque objects
+    Buffer* pDBDrawCmdsOpaque = NULL;
+    Buffer* pDBDrawCmdsOpaqueDoubleSided = NULL;
     Buffer* pDBDrawCmdCount = NULL;
     Buffer* pSBPerDraw = NULL;
 
@@ -58,12 +63,16 @@ struct SceneRenderer
     ComputePipeline* pPipeGenerateDraws = NULL;
 
     // GBuffer draw pass
-    RenderTarget* pRTSceneGeometryColor = NULL;
-    RenderTarget* pRTSceneGeometryDepth = NULL;
-    VertexLayout mVLSceneGeometry;
-    Shader* pVSSceneGeometry = NULL;
-    Shader* pPSSceneGeometry = NULL;
-    GraphicsPipeline* pPipeSceneGeometry = NULL;
+    RenderTarget* pRTGBufferColor = NULL;
+    RenderTarget* pRTGBufferDepth = NULL;
+    VertexLayout mVLGBuffer;
+    Shader* pVSGBufferOpaque = NULL;
+    Shader* pPSGBufferOpaque = NULL;
+    GraphicsPipeline* pPipeGBufferOpaque = NULL;
+
+    Shader* pVSGBufferOpaqueDoubleSided = NULL;
+    Shader* pPSGBufferOpaqueDoubleSided = NULL;
+    GraphicsPipeline* pPipeGBufferOpaqueDoubleSided = NULL;
 };
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
