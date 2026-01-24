@@ -14,7 +14,12 @@ struct PerFrameUniforms
     m4f mProj = {};
 };
 
-#define SCENE_RENDERER_MAX_TEXTURES 1024
+struct PerDrawData
+{
+    uint32 mNodeId = MAX_UINT32;
+};
+
+#define SCENE_MAX_TEXTURES 1024
 struct SceneRenderer
 {
     // References
@@ -29,17 +34,20 @@ struct SceneRenderer
     GpuTimer mGpuTimer = {};
 
     // Render resources
-    Buffer* pVBSceneGeometry = NULL;
-    Buffer* pIBSceneGeometry = NULL;
-    Buffer* pSBSceneNodes = NULL;
-    Buffer* pSBSceneMeshes = NULL;
-    Buffer* pUBPerFrame = NULL;
+    Buffer* pVBSceneGeometry    = NULL;
+    Buffer* pIBSceneGeometry    = NULL;
+    Buffer* pSBSceneNodes       = NULL;
+    Buffer* pSBSceneMeshes      = NULL;
+    Buffer* pSBSceneMaterials   = NULL;
+    Buffer* pUBPerFrame         = NULL;
 
-    Texture* pTexScene[SCENE_RENDERER_MAX_TEXTURES];
-    uint32 texCount = 0;
+    Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
+    uint32 mMaterialMapCount = 0;
+    Sampler* pSamplerLinear = NULL;
     
     Buffer* pDBDrawCmds = NULL;
     Buffer* pDBDrawCmdCount = NULL;
+    Buffer* pSBPerDraw = NULL;
 
     // Descriptor sets
     DescriptorSet* pDSPerFrame = NULL;

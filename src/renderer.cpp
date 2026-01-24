@@ -22,7 +22,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Load textures from scene model
     {
         PROFILE_SCOPE_NAME("initSceneRenderer::Load Textures");
-        pSceneRenderer->texCount = texCount;
+        pSceneRenderer->mMaterialMapCount = texCount;
         for(uint32 t = 0; t < texCount; t++)
         {
             PROFILE_SCOPE_NAME("initSceneRenderer::Load Texture");
@@ -30,7 +30,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             char buf[256];
             String texPath = strf(buf, "%.*s/%.*s", STRF_ARG(rootPath), STRF_ARG(pTexPaths[t]));
             loadTexture(pAssetManager, pRenderer, texPath, false, &pTex);
-            pSceneRenderer->pTexScene[t] = pTex;
+            pSceneRenderer->pTexMaterialMaps[t] = pTex;
         }
     }
 
@@ -76,6 +76,20 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         desc.mCount = SCENE_MAX_MESHES;
         desc.mStride = sizeof(SceneMesh);
         addBuffer(pRenderer, desc, &pSceneRenderer->pSBSceneMeshes, &pScene->mMeshes[0]);
+
+        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mSize = sizeof(SceneMaterial) * SCENE_MAX_MATERIALS;
+        desc.mCount = SCENE_MAX_MATERIALS;
+        desc.mStride = sizeof(SceneMaterial);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBSceneMaterials, &pScene->mMaterials[0]);
+    }
+
+    // Default sampler
+    {
+        SamplerDesc desc = {};
+        desc.mMinFilter = SAMPLER_FILTER_LINEAR;
+        desc.mMagFilter = SAMPLER_FILTER_LINEAR;
+        addSampler(pRenderer, desc, &pSceneRenderer->pSamplerLinear);
     }
 
     // GPU draw call buffers
@@ -93,6 +107,12 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         desc.mCount = 1;
         desc.mStride = sizeof(uint32);
         addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmdCount);
+
+        desc.mType = (BufferType)(BUFFER_TYPE_STORAGE | BUFFER_TYPE_TRANSFER_DST);
+        desc.mSize = sizeof(PerDrawData) * SCENE_MAX_DRAWS;
+        desc.mCount = SCENE_MAX_DRAWS;
+        desc.mStride = sizeof(PerDrawData);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBPerDraw);
     }
 
     // Per frame data uniform buffer
@@ -128,16 +148,19 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
 
     Renderer* pRenderer = pSceneRenderer->pRenderer;
 
-    for(uint32 t = 0; t < pSceneRenderer->texCount; t++)
+    for(uint32 t = 0; t < pSceneRenderer->mMaterialMapCount; t++)
     {
-        removeTexture(pRenderer, &pSceneRenderer->pTexScene[t]);
+        removeTexture(pRenderer, &pSceneRenderer->pTexMaterialMaps[t]);
     }
 
+    removeSampler(pRenderer, &pSceneRenderer->pSamplerLinear);
     removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame);
+    removeBuffer(pRenderer, &pSceneRenderer->pSBPerDraw);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdCount);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmds);
     removeBuffer(pRenderer, &pSceneRenderer->pVBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pIBSceneGeometry);
+    removeBuffer(pRenderer, &pSceneRenderer->pSBSceneMaterials);
     removeBuffer(pRenderer, &pSceneRenderer->pSBSceneMeshes);
     removeBuffer(pRenderer, &pSceneRenderer->pSBSceneNodes);
 
@@ -191,11 +214,18 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     if(!pSceneRenderer->pDSSceneGeometry)
     {
         DescriptorSetDesc desc = {};
-        desc.mCount = 4;
-        desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
-        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
-        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmds, 1 };
-        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdCount, 1 };
+        desc.mCount = 8;
+        // TODO(caio): Buffer arrays?
+        desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmds, 1 };
+        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdCount, 1 };
+        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBPerDraw, 1 };
+        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
+        desc.mResources[4] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
+        desc.mResources[5] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMaterials, 1 };
+        desc.mResources[6] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pTexMaterialMaps, 
+            pSceneRenderer->mMaterialMapCount, 
+            SCENE_MAX_TEXTURES };
+        desc.mResources[7] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerLinear, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSSceneGeometry);
     }
 
@@ -223,8 +253,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pVS = pSceneRenderer->pVSSceneGeometry;
         desc.pFS = pSceneRenderer->pPSSceneGeometry;
 
-        desc.mCullMode = CULL_MODE_NONE;    // TODO(caio): Activate proper face culling
-        desc.mFrontFace = FRONT_FACE_CW;
+        desc.mCullMode = CULL_MODE_BACK;    // TODO(caio): Verify proper face culling
+        desc.mFrontFace = FRONT_FACE_CCW;
 
         desc.mDepthTest = true;
         desc.mDepthWrite = true;
@@ -347,6 +377,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &pSceneRenderer->pScene->mNodeCount);
 
         cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
+        cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
         cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
 
         Barrier barrier = {};
@@ -384,10 +415,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
 
-
         uint32 constants[2];
         constants[0] = pRenderer->mActiveFrame;
-        constants[1] = 0;   // TODO(caio): Remove dead code
         cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32) * 2, &constants);
 
         cmdDrawIndexedIndirect(pCmd, 

@@ -3,31 +3,6 @@
 
 layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
 
-DEFINE_UNIFORM_BLOCK(0, 0)
-{
-    PerFrameUniforms perFrameUniforms[2];
-};
-
-DEFINE_STORAGE_BLOCK(1, 0)
-{
-    SceneNode sceneNodes[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 1)
-{
-    SceneMesh sceneMeshes[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 2)
-{
-    IndirectDraw drawCmds[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 3)
-{
-    uint drawCmdCount;
-};
-
 DEFINE_CONSTANT_BLOCK
 {
     uint nodeCount;
@@ -50,4 +25,6 @@ void main()
     drawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
     drawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
     drawCmds[drawIdx].mFirstInstance = 0;
+
+    perDraw[drawIdx].mNodeId = idx;
 }

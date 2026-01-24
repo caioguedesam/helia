@@ -10,14 +10,16 @@
 
 #define VS_IN(N) layout(location = N) in
 #define VS_OUT(N) layout(location = N) out
+#define VS_OUT_NOINTERP(N) layout(location = N) flat out
 #define PS_IN(N) layout(location = N) in
+#define PS_IN_NOINTERP(N) layout(location = N) flat in
 #define PS_OUT(N) layout(location = N) out
 
-#define DEFINE_UNIFORM_BLOCK(SET, BINDING) layout(std140, set = SET, binding = BINDING) uniform CONCAT(UNIFORM_BLOCK_, __LINE__)
-#define DEFINE_STORAGE_BLOCK(SET, BINDING) layout(std430, set = SET, binding = BINDING) buffer CONCAT(STORAGE_BLOCK_, __LINE__)
-#define DEFINE_SAMPLER2D(SET, BINDING) layout(set = SET, binding = BINDING) uniform sampler2D
-#define DEFINE_SAMPLER3D(SET, BINDING) layout(set = SET, binding = BINDING) uniform sampler3D
+#define DEFINE_UNIFORM_BLOCK(SET, BINDING)  layout(std140, set = SET, binding = BINDING) uniform CONCAT(UNIFORM_BLOCK_, __LINE__)
+#define DEFINE_STORAGE_BLOCK(SET, BINDING)  layout(std430, set = SET, binding = BINDING) buffer CONCAT(STORAGE_BLOCK_, __LINE__)
+#define DEFINE_SAMPLER2D(SET, BINDING)      layout(set = SET, binding = BINDING) uniform sampler2D
+#define DEFINE_SAMPLER3D(SET, BINDING)      layout(set = SET, binding = BINDING) uniform sampler3D
+#define DEFINE_TEXTURE2D(SET, BINDING)      layout(set = SET, binding = BINDING) uniform texture2D
+#define DEFINE_SAMPLER(SET, BINDING)        layout(set = SET, binding = BINDING) uniform sampler
 
 #define DEFINE_CONSTANT_BLOCK layout(push_constant) uniform CONCAT(PUSH_CONSTANT_BLOCK_, __LINE__)
-
-// TODO(caio): Macros for resource arrays?

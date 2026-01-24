@@ -20,6 +20,8 @@ struct SceneMaterial
     uint32  mNormalTexture              = MAX_UINT16;
     uint32  mMetallicRoughnessTexture   = MAX_UINT16;
     // TODO(caio): Emissive, occlusion, other stuff
+
+    uint32 mPadding0[3];
 };
 
 struct SceneNode

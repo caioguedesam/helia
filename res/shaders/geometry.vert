@@ -6,27 +6,21 @@ VS_IN(1) vec3 inNormal;
 VS_IN(2) vec2 inUV;
 VS_IN(3) vec4 inTangent;
 
-DEFINE_UNIFORM_BLOCK(0, 0)
-{
-    PerFrameUniforms perFrameUniforms[2];
-};
-
-DEFINE_STORAGE_BLOCK(1, 0)
-{
-    SceneNode sceneNodes[];
-};
+VS_OUT(0) vec2 outUV;
+VS_OUT_NOINTERP(1) uint outNodeId;
 
 DEFINE_CONSTANT_BLOCK
 {
     uint frameId;
-    uint nodeId;
 };
 
 void main()
 {
-    uint idx = gl_DrawID;
-    SceneNode node = sceneNodes[idx];
-    //gl_Position = perFrame.mProj * perFrame.mView * perFrame.mWorld * vec4(viPosition, 1.0f);
+    outUV = inUV;
+
+    PerDrawData drawData = perDraw[gl_DrawID];
+    outNodeId = drawData.mNodeId;
+    SceneNode node = sceneNodes[drawData.mNodeId];
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * node.mTransform * vec4(inPosition, 1.0f);
 }
