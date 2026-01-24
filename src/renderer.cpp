@@ -4,6 +4,7 @@
 #include "../dw/src/render/render.hpp"
 #include "../dw/src/render/ui.hpp"
 #include "../dw/src/render/texture.hpp"
+#include "dw/src/core/base.hpp"
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
@@ -208,40 +209,48 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
 void addSceneShaders(SceneRenderer* pSceneRenderer)
 {
+    String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     if(!pSceneRenderer->pVSGBufferOpaque)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/geometry.vert"), 
+                gbufferShaderPath, 
+                SHADER_TYPE_VERT, NULL, 0,
                 &pSceneRenderer->pVSGBufferOpaque);
     }
 
     if(!pSceneRenderer->pPSGBufferOpaque)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/geometry.frag"), 
+                gbufferShaderPath, 
+                SHADER_TYPE_FRAG, NULL, 0,
                 &pSceneRenderer->pPSGBufferOpaque);
     }
 
-    // TODO(caio): Same shader but with different compile time defines
-    // to avoid having multiple files
+    String doubleSidedDefines[] =
+    {
+        str("DOUBLE_SIDED"),
+    };
     if(!pSceneRenderer->pVSGBufferOpaqueDoubleSided)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/geometry_ds.vert"), 
+                gbufferShaderPath, 
+                SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines),
                 &pSceneRenderer->pVSGBufferOpaqueDoubleSided);
     }
 
     if(!pSceneRenderer->pPSGBufferOpaqueDoubleSided)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/geometry_ds.frag"), 
+                gbufferShaderPath,
+                SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines),
                 &pSceneRenderer->pPSGBufferOpaqueDoubleSided);
     }
 
     if(!pSceneRenderer->pCSGenerateDraws)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/generate_draws.comp"), 
+                str("../../res/shaders/generate_draws.glsl"), 
+                SHADER_TYPE_COMP, NULL, 0,
                 &pSceneRenderer->pCSGenerateDraws);
     }
 }
