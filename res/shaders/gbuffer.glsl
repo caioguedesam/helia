@@ -64,6 +64,12 @@ void main()
 
     // Normals
     vec3 vertexNormal = normalize(inNormal);
+#if DOUBLE_SIDED
+    if(!gl_FrontFacing)
+    {
+        vertexNormal = -vertexNormal;
+    }
+#endif
     outGBufferB = vec4(vertexNormal, 0.0);
 
     // Metallic + Roughness

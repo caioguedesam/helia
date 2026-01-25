@@ -271,7 +271,6 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
     // Final present RT
     {
         RenderTargetDesc desc = {};
-        // Swap chain performs sRGB conversion automatically, so this must be UNORM
         desc.mFormat = FORMAT_RGBA8_UNORM;
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
