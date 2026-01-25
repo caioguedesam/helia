@@ -24,8 +24,9 @@ PS_OUT(0) vec4 outColor;
 
 void main()
 {
+    // TODO(caio): Tone mapping
     vec4 result = texture(
-            sampler2D(gbufferA, samplerPoint), inUV);
+            sampler2D(lightingAccum, samplerPoint), inUV);
     outColor = vec4(result.rgb, 1.0);
 }
 

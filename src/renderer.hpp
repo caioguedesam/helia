@@ -34,8 +34,12 @@ struct SceneRenderer
     GpuTimer mGpuTimer = {};
 
     // Render resources
+    Buffer* pVBScreenQuad       = NULL;
+    Buffer* pIBScreenQuad       = NULL;
+    VertexLayout mVLScreenQuad = {};
     Buffer* pVBSceneGeometry    = NULL;
     Buffer* pIBSceneGeometry    = NULL;
+    VertexLayout mVLSceneGeometry = {};
     Buffer* pSBSceneNodes       = NULL;
     Buffer* pSBSceneMeshes      = NULL;
     Buffer* pSBSceneMaterials   = NULL;
@@ -58,7 +62,6 @@ struct SceneRenderer
     // Descriptor sets
     DescriptorSet* pDSPerFrame = NULL;
     DescriptorSet* pDSGlobal = NULL;
-    DescriptorSet* pDSLightingPass = NULL;
 
     // Draw call buffer pass
     Shader* pCSGenerateDraws = NULL;
@@ -69,7 +72,6 @@ struct SceneRenderer
     RenderTarget* pRTGBufferB = NULL;
     RenderTarget* pRTGBufferC = NULL;
     RenderTarget* pRTGBufferDepth = NULL;
-    VertexLayout mVLGBuffer = {};
     Shader* pVSGBufferOpaque = NULL;
     Shader* pPSGBufferOpaque = NULL;
     GraphicsPipeline* pPipeGBufferOpaque = NULL;
@@ -78,8 +80,13 @@ struct SceneRenderer
     RenderTarget* pRTAccum = NULL;
     Shader* pVSLighting = NULL;
     Shader* pPSLighting = NULL;
-    VertexLayout mVLLighting = {};
     GraphicsPipeline* pPipeLighting = NULL;
+
+    // Final present pass
+    RenderTarget* pRTPresent = NULL;
+    Shader* pVSTonemapping = NULL;
+    Shader* pPSTonemapping = NULL;
+    GraphicsPipeline* pPipeTonemapping = NULL;
 
     Shader* pVSGBufferOpaqueDoubleSided = NULL;
     Shader* pPSGBufferOpaqueDoubleSided = NULL;

@@ -4,7 +4,7 @@
 #include "../dw/src/render/render.hpp"
 #include "../dw/src/render/ui.hpp"
 #include "../dw/src/render/texture.hpp"
-#include "dw/src/core/base.hpp"
+#include "../dw/src/core/base.hpp"
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
@@ -63,7 +63,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         desc.mAttribs[1] = ATTRIBUTE_FLOAT3;    // Normal
         desc.mAttribs[2] = ATTRIBUTE_FLOAT2;    // UV
         desc.mAttribs[3] = ATTRIBUTE_FLOAT4;    // Tangent
-        initVertexLayout(desc, &pSceneRenderer->mVLGBuffer);
+        initVertexLayout(desc, &pSceneRenderer->mVLSceneGeometry);
     }
 
     // Screen quad vertex layout
@@ -72,7 +72,37 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         desc.mCount = 2;
         desc.mAttribs[0] = ATTRIBUTE_FLOAT2;    // Position
         desc.mAttribs[1] = ATTRIBUTE_FLOAT2;    // UV
-        initVertexLayout(desc, &pSceneRenderer->mVLLighting);
+        initVertexLayout(desc, &pSceneRenderer->mVLScreenQuad);
+    }
+
+    // Screen quad vertex/index buffers
+    {
+        // Screen quad is a triangle in NDC, which is parially rendered to avoid overdraw.
+        float vertexData[] =
+        {
+            -1.f, -1.f, 0.f, 0.f,
+            3.f, -1.f, 2.f, 0.f,
+            -1.f, 3.f, 0.f, 2.f,
+        };
+
+        uint16 indexData[] =
+        {
+            0, 2, 1,
+        };
+
+        BufferDesc vbDesc = {};
+        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mSize = ARR_LEN(vertexData) * sizeof(float);
+        vbDesc.mCount = ARR_LEN(vertexData) / 4;
+        vbDesc.mStride = sizeof(float);     // Should this be * 4?
+        addBuffer(pRenderer, vbDesc, &pSceneRenderer->pVBScreenQuad, vertexData);
+
+        BufferDesc ibDesc = {};
+        ibDesc.mType = BUFFER_TYPE_INDEX;
+        ibDesc.mSize = ARR_LEN(indexData) * sizeof(uint16);
+        ibDesc.mCount = ARR_LEN(indexData);
+        ibDesc.mStride = sizeof(uint16);
+        addBuffer(pRenderer, ibDesc, &pSceneRenderer->pIBScreenQuad, indexData);
     }
 
     // Geometry vertex/index buffers
@@ -81,7 +111,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         vbDesc.mType = BUFFER_TYPE_VERTEX;
         vbDesc.mSize = pScene->vertexCount * sizeof(float) * 12;
         vbDesc.mCount = pScene->vertexCount;
-        vbDesc.mStride = sizeof(float);
+        vbDesc.mStride = sizeof(float);     // Should this be * 12?
         addBuffer(pRenderer, vbDesc, &pSceneRenderer->pVBSceneGeometry, pScene->pVertexData);
 
         BufferDesc ibDesc = {};
@@ -195,6 +225,8 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdCount);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided);
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdsOpaque);
+    removeBuffer(pRenderer, &pSceneRenderer->pVBScreenQuad);
+    removeBuffer(pRenderer, &pSceneRenderer->pIBScreenQuad);
     removeBuffer(pRenderer, &pSceneRenderer->pVBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pIBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pSBSceneMaterials);
@@ -236,16 +268,28 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferDepth);
     }
 
+    // Final present RT
+    {
+        RenderTargetDesc desc = {};
+        // Swap chain performs sRGB conversion automatically, so this must be UNORM
+        desc.mFormat = FORMAT_RGBA8_UNORM;
+        desc.mClear = {{0,0,0,0}};
+        desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
+        desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
+        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTPresent);
+    }
+
     // Transitioning render targets so they can be bound to descriptor sets
     {
         CommandBuffer* pCmd = getCmd(pSceneRenderer->pRenderer, true);
         beginCmd(pCmd);
 
-        RenderTargetBarrier barriers[4];
-        barriers[0] = {pSceneRenderer->pRTGBufferA, getImageLayout(pSceneRenderer->pRTGBufferA), IMAGE_LAYOUT_GENERAL };
-        barriers[1] = {pSceneRenderer->pRTGBufferB, getImageLayout(pSceneRenderer->pRTGBufferB), IMAGE_LAYOUT_GENERAL };
-        barriers[2] = {pSceneRenderer->pRTGBufferC, getImageLayout(pSceneRenderer->pRTGBufferC), IMAGE_LAYOUT_GENERAL };
-        barriers[3] = {pSceneRenderer->pRTGBufferDepth, getImageLayout(pSceneRenderer->pRTGBufferDepth), IMAGE_LAYOUT_GENERAL };
+        RenderTargetBarrier barriers[5];
+        barriers[0] = {pSceneRenderer->pRTGBufferA,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[1] = {pSceneRenderer->pRTGBufferB,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[2] = {pSceneRenderer->pRTGBufferC,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[3] = {pSceneRenderer->pRTGBufferDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[4] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         endCmd(pCmd);
@@ -255,8 +299,10 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
 void addSceneShaders(SceneRenderer* pSceneRenderer)
 {
+    String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
     String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
+    String tonemappingShaderPath = str("../../res/shaders/tone_mapping.glsl");
     if(!pSceneRenderer->pVSGBufferOpaque)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
@@ -296,7 +342,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     if(!pSceneRenderer->pCSGenerateDraws)
     {
         loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                str("../../res/shaders/generate_draws.glsl"), 
+                generateDrawsShaderPath, 
                 SHADER_TYPE_COMP, NULL, 0,
                 &pSceneRenderer->pCSGenerateDraws);
     }
@@ -316,6 +362,22 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
                 SHADER_TYPE_FRAG, NULL, 0,
                 &pSceneRenderer->pPSLighting);
     }
+
+    if(!pSceneRenderer->pVSTonemapping)
+    {
+        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                tonemappingShaderPath, 
+                SHADER_TYPE_VERT, NULL, 0,
+                &pSceneRenderer->pVSTonemapping);
+    }
+
+    if(!pSceneRenderer->pPSTonemapping)
+    {
+        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                tonemappingShaderPath, 
+                SHADER_TYPE_FRAG, NULL, 0,
+                &pSceneRenderer->pPSTonemapping);
+    }
 }
 
 void addSceneDescriptors(SceneRenderer* pSceneRenderer)
@@ -324,7 +386,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     if(!pSceneRenderer->pDSGlobal)
     {
         DescriptorSetDesc desc = {};
-        desc.mCount = 14;
+        desc.mCount = 15;
         // TODO(caio): Buffer arrays?
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaque, 1 };
         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 1 };
@@ -342,6 +404,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[11] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
         desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferC->pTexture, 1 };
         desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferDepth->pTexture, 1 };
+        desc.mResources[14] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
     }
 
@@ -366,7 +429,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mRenderTargetFormats[2] = pSceneRenderer->pRTGBufferC->mDesc.mFormat;
         desc.mDepthTargetFormat = pSceneRenderer->pRTGBufferDepth->mDesc.mFormat;
 
-        desc.mVertexLayout = pSceneRenderer->mVLGBuffer;
+        desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
         desc.pVS = pSceneRenderer->pVSGBufferOpaque;
         desc.pFS = pSceneRenderer->pPSGBufferOpaque;
 
@@ -427,7 +490,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mRenderTargetCount = 1;
         desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccum->mDesc.mFormat;
 
-        desc.mVertexLayout = pSceneRenderer->mVLLighting;
+        desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
         desc.pVS = pSceneRenderer->pVSLighting;
         desc.pFS = pSceneRenderer->pPSLighting;
 
@@ -446,10 +509,38 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeLighting);
     }
+
+    if(!pSceneRenderer->pPipeTonemapping)
+    {
+        GraphicsPipelineDesc desc = {};
+
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTPresent->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
+        desc.pVS = pSceneRenderer->pVSTonemapping;
+        desc.pFS = pSceneRenderer->pPSTonemapping;
+
+        desc.mCullMode = CULL_MODE_BACK;
+        desc.mFrontFace = FRONT_FACE_CCW;
+
+        desc.mDepthTest = false;
+        desc.mDepthWrite = false;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+
+        // Constants:
+        desc.mConstantBlockCount = 0;
+
+        addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeTonemapping);
+    }
 }
 
 void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
 {
+    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTPresent);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTAccum);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
@@ -473,6 +564,10 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSLighting);
     if(pSceneRenderer->pPSLighting)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSLighting);
+    if(pSceneRenderer->pVSTonemapping)
+        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSTonemapping);
+    if(pSceneRenderer->pPSTonemapping)
+        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSTonemapping);
 }
 
 void removeSceneDescriptors(SceneRenderer* pSceneRenderer)
@@ -493,6 +588,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
     if(pSceneRenderer->pPipeLighting)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeLighting);
+    if(pSceneRenderer->pPipeTonemapping)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeTonemapping);
 }
 
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
@@ -617,9 +714,82 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         gpuTimestamp(str("GBuffer Pass"), &gpuTimerParams);
     }
 
+    // Lighting pass
+    {
+        RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
+        RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
+        RenderTarget* pRTGBufferC = pSceneRenderer->pRTGBufferC;
+        RenderTarget* pRTDepth = pSceneRenderer->pRTGBufferDepth;
+        RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;
+
+        RenderTargetBarrier barriers[5];
+        barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[2] = {pRTGBufferC, getImageLayout(pRTGBufferC), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[3] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[4] = {pRTAccum, getImageLayout(pRTAccum), IMAGE_LAYOUT_COLOR_OUTPUT };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        RenderTargetBindDesc bindDesc = {};
+        bindDesc.mColorCount = 1;
+        bindDesc.mColorBindings[0] = { pRTAccum, LOAD_OP_CLEAR, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        cmdSetViewport(pCmd, pRTAccum);
+        cmdSetScissor(pCmd, pRTAccum);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
+        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
+
+        cmdDrawIndexed(pCmd, 
+                3, 1, 0, 0);
+
+        cmdUnbindRenderTargets(pCmd);
+        gpuTimestamp(str("Lighting Pass"), &gpuTimerParams);
+    }
+
+    // Tone mapping pass
+    {
+        RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+        RenderTarget* pRTPresent = pSceneRenderer->pRTPresent;
+
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeTonemapping;
+
+        RenderTargetBarrier barriers[2];
+        barriers[0] = {pRTAccum, getImageLayout(pRTAccum), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[1] = {pRTPresent, getImageLayout(pRTPresent), IMAGE_LAYOUT_COLOR_OUTPUT };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        RenderTargetBindDesc bindDesc = {};
+        bindDesc.mColorCount = 1;
+        bindDesc.mColorBindings[0] = { pRTPresent, LOAD_OP_CLEAR, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        cmdSetViewport(pCmd, pRTPresent);
+        cmdSetScissor(pCmd, pRTPresent);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
+        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
+
+        cmdDrawIndexed(pCmd, 
+                3, 1, 0, 0);
+
+        gpuTimestamp(str("Tone Mapping"), &gpuTimerParams);
+    }
+
     // UI pass
     {
-        RenderTarget* pRTColor = pSceneRenderer->pRTGBufferA;
+        RenderTarget* pRTColor = pSceneRenderer->pRTPresent;
         RenderTargetBindDesc bindDesc = {};
         bindDesc.mColorCount = 1;
         bindDesc.mColorBindings[0] = { pRTColor, LOAD_OP_LOAD, STORE_OP_STORE };
@@ -633,10 +803,10 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
     // Copy to swap chain
     {
-        RenderTarget* pRTColor = pSceneRenderer->pRTGBufferA;
-        RenderTargetBarrier barrier = {pRTColor, IMAGE_LAYOUT_COLOR_OUTPUT, IMAGE_LAYOUT_TRANSFER_SRC };
+        RenderTarget* pRTPresent = pSceneRenderer->pRTPresent;
+        RenderTargetBarrier barrier = {pRTPresent, IMAGE_LAYOUT_COLOR_OUTPUT, IMAGE_LAYOUT_TRANSFER_SRC };
         cmdRenderTargetBarrier(pCmd, 1, &barrier);
-        cmdCopyToSwapChain(pCmd, &pRenderer->mSwapChain, pRTColor->pTexture);
+        cmdCopyToSwapChain(pCmd, &pRenderer->mSwapChain, pRTPresent->pTexture);
         gpuTimestamp(str("Swap Chain copy"), &gpuTimerParams);
     }
 
