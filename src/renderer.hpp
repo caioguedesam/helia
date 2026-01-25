@@ -44,6 +44,7 @@ struct SceneRenderer
     Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
     uint32 mMaterialMapCount = 0;
     Sampler* pSamplerLinear = NULL;
+    Sampler* pSamplerPoint = NULL;
     
     // Draw call buffers
     // Passes:
@@ -56,19 +57,29 @@ struct SceneRenderer
 
     // Descriptor sets
     DescriptorSet* pDSPerFrame = NULL;
-    DescriptorSet* pDSSceneGeometry = NULL;
+    DescriptorSet* pDSGlobal = NULL;
+    DescriptorSet* pDSLightingPass = NULL;
 
     // Draw call buffer pass
     Shader* pCSGenerateDraws = NULL;
     ComputePipeline* pPipeGenerateDraws = NULL;
 
     // GBuffer draw pass
-    RenderTarget* pRTGBufferColor = NULL;
+    RenderTarget* pRTGBufferA = NULL;
+    RenderTarget* pRTGBufferB = NULL;
+    RenderTarget* pRTGBufferC = NULL;
     RenderTarget* pRTGBufferDepth = NULL;
-    VertexLayout mVLGBuffer;
+    VertexLayout mVLGBuffer = {};
     Shader* pVSGBufferOpaque = NULL;
     Shader* pPSGBufferOpaque = NULL;
     GraphicsPipeline* pPipeGBufferOpaque = NULL;
+
+    // Lighting pass
+    RenderTarget* pRTAccum = NULL;
+    Shader* pVSLighting = NULL;
+    Shader* pPSLighting = NULL;
+    VertexLayout mVLLighting = {};
+    GraphicsPipeline* pPipeLighting = NULL;
 
     Shader* pVSGBufferOpaqueDoubleSided = NULL;
     Shader* pPSGBufferOpaqueDoubleSided = NULL;

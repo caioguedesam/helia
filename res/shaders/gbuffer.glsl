@@ -8,8 +8,9 @@ VS_IN(1) vec3 inNormal;
 VS_IN(2) vec2 inUV;
 VS_IN(3) vec4 inTangent;
 
-VS_OUT(0) vec2 outUV;
-VS_OUT_NOINTERP(1) uint outNodeId;
+VS_OUT_NOINTERP(0) uint outNodeId;
+VS_OUT(1) vec2 outUV;
+VS_OUT(2) vec3 outNormal;
 
 DEFINE_CONSTANT_BLOCK
 {
@@ -29,20 +30,27 @@ void main()
     SceneNode node = sceneNodes[outNodeId];
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * node.mTransform * vec4(inPosition, 1.0f);
+
+    outNormal = inNormal;
 }
 #endif  // VERTEX_SHADER
 
 // ====================================================
 #ifdef PIXEL_SHADER
-PS_IN(0) vec2 inUV;
-PS_IN_NOINTERP(1) uint inNodeId;
+PS_IN_NOINTERP(0) uint inNodeId;
+PS_IN(1) vec2 inUV;
+PS_IN(2) vec3 inNormal;
 
-PS_OUT(0) vec4 outColor;
+PS_OUT(0) vec4 outGBufferA;
+PS_OUT(1) vec4 outGBufferB;
+PS_OUT(2) vec2 outGBufferC;
 
 void main()
 {
     SceneNode node = sceneNodes[inNodeId];
     SceneMaterial material = sceneMaterials[node.mMaterialId];
+
+    // Diffuse color
     vec4 baseColor = texture(
             sampler2D(materialMaps[material.mBaseColorTexId], samplerLinear),
             inUV);
@@ -52,6 +60,16 @@ void main()
         discard;
     }
 
-    outColor = vec4(baseColor.rgb, 1.0);
+    outGBufferA = vec4(baseColor.rgb, 1.0);
+
+    // Normals
+    vec3 vertexNormal = normalize(inNormal);
+    outGBufferB = vec4(vertexNormal, 0.0);
+
+    // Metallic + Roughness
+    vec4 metallicRoughness = texture(
+            sampler2D(materialMaps[material.mMetallicRoughnessTexId], samplerLinear),
+            inUV);
+    outGBufferC = vec2(metallicRoughness.gb);
 }
 #endif  // PIXEL_SHADER
