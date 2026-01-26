@@ -7,11 +7,24 @@
 #include "../dw/src/render/timings.hpp"
 #include "scene.hpp"
 
+struct DirectionalLight
+{
+    v3f mDir = {0,0,0};
+    float mIntensity = 1.f;
+    v3f mColor = {1,1,1};
+};
+
 struct PerFrameUniforms
 {
     m4f mWorld = {};
     m4f mView = {};
     m4f mProj = {};
+
+    v4f mCamWorldPos = {0,0,0,1};
+    v4f mDirLight1 = {0,0,0,1};          // xyz = Direction, w = Intensity
+    v4f mDirLight2 = {1,1,1,0.05f};      // rgb = Color, a = Ambient factor
+
+    v4f mPadding0;
 };
 
 struct PerDrawData
@@ -31,6 +44,8 @@ struct SceneRenderer
     // Render data
     PerFrameUniforms perFrameUniforms[CONCURRENT_FRAMES];
     Camera mCamera = {};
+    DirectionalLight mDirLight = {};
+    float mAmbient = 0.f;
     GpuTimer mGpuTimer = {};
 
     // Render resources

@@ -37,6 +37,12 @@ struct PerFrameUniforms
     mat4 mWorld;
     mat4 mView;
     mat4 mProj;
+
+    vec4 mCamWorldPos;
+    vec4 mLight1;
+    vec4 mLight2;
+
+    STRUCT_PADDING_VEC4(0, 1);
 };
 
 struct PerDrawData

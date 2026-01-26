@@ -1,6 +1,11 @@
 #version 460 core
 #include "common.glsl"
 
+DEFINE_CONSTANT_BLOCK
+{
+    uint frameId;
+};
+
 // ====================================================
 #ifdef VERTEX_SHADER
 VS_IN(0) vec2 inPosition;
@@ -18,24 +23,26 @@ void main()
 // ====================================================
 #ifdef PIXEL_SHADER
 
-const float kAmbient = 0.05f;
-const vec3 dirLight = vec3(1.0f, -0.5f, 0.5f);
-
 PS_IN(0) vec2 inUV;
 
 PS_OUT(0) vec4 outColor;
 
 void main()
 {
-    vec3 L = -normalize(dirLight);
+    PerFrameUniforms perFrame = perFrameUniforms[frameId];
+
+    vec3 lightColor = perFrame.mLight2.rgb;
+    vec3 ambientLight = perFrame.mLight2.w * lightColor;
+
+    vec3 L = -(perFrame.mLight1.xyz);
     vec3 N = texture(sampler2D(gbufferB, samplerPoint), inUV).xyz;
     float NoL = dot(N, L);
-    float kDiffuse = max(NoL, 0.0f);
+    vec3 diffuseLight = max(NoL, 0.0f) * perFrame.mLight1.w * lightColor;
 
-    vec3 diffuseColor = texture(sampler2D(gbufferA, samplerPoint), inUV).rgb;
+    vec3 surfaceColor = texture(sampler2D(gbufferA, samplerPoint), inUV).rgb;
 
     vec4 result;
-    result.rgb = (kAmbient + kDiffuse) * diffuseColor;
+    result.rgb = (ambientLight + diffuseLight) * surfaceColor;
     outColor = vec4(result.rgb, 1.0f);
 }
 

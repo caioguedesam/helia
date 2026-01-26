@@ -204,6 +204,13 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             camDesc, 
             &pSceneRenderer->mCamera);
 
+    DirectionalLight light = {};
+    light.mDir = {1.f, -0.5f, 0.5f};
+    light.mIntensity = 1.f;
+    light.mColor = {1,1,1};
+    pSceneRenderer->mDirLight = light;
+    pSceneRenderer->mAmbient = 0.05f;
+
     initGpuTimer(pRenderer, &pSceneRenderer->mGpuTimer);
 }
 
@@ -504,7 +511,10 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
 
         // Constants:
-        desc.mConstantBlockCount = 0;
+        // - Active frame (uint32)
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeLighting);
     }
@@ -597,6 +607,11 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
     pSceneRenderer->perFrameUniforms[activeFrame].mWorld = identity();
     pSceneRenderer->perFrameUniforms[activeFrame].mView = getView(&pSceneRenderer->mCamera);
     pSceneRenderer->perFrameUniforms[activeFrame].mProj = getProj(&pSceneRenderer->mCamera);
+
+    pSceneRenderer->perFrameUniforms[activeFrame].mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
+    DirectionalLight light = pSceneRenderer->mDirLight;
+    pSceneRenderer->perFrameUniforms[activeFrame].mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
+    pSceneRenderer->perFrameUniforms[activeFrame].mDirLight2 = to4f(light.mColor, pSceneRenderer->mAmbient);
 }
 
 void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
@@ -689,9 +704,9 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
 
-        uint32 constants[2];
+        uint32 constants[1];
         constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32) * 2, &constants);
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
 
         // Opaque
         cmdDrawIndexedIndirect(pCmd, 
@@ -746,6 +761,10 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
 
+        uint32 constants[1];
+        constants[0] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
+
         cmdDrawIndexed(pCmd, 
                 3, 1, 0, 0);
 
@@ -794,6 +813,14 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         bindDesc.mColorBindings[0] = { pRTColor, LOAD_OP_LOAD, STORE_OP_STORE };
 
         uiStartFrame();
+        uiSlider3f(str("Light Direction"), 
+                &pSceneRenderer->mDirLight.mDir.mData[0], 
+                -1.f, 1.f);
+        uiSliderf(str("Light Intensity"), &pSceneRenderer->mDirLight.mIntensity, 0.f, 10.f);
+        uiColor3f(str("Light Color"), 
+                &pSceneRenderer->mDirLight.mColor.mData[0]);
+        uiSliderf(str("Ambient"), &pSceneRenderer->mAmbient, 0.f, 1.f);
+        uiSeparator();
         uiGpuTimingsWindow(&pSceneRenderer->pApp->mAppArena, &pSceneRenderer->mGpuTimer, 
                 -400, 0, 400, 0);
         uiEndFrame(pCmd, bindDesc);
