@@ -34,9 +34,10 @@ struct SceneMaterial
 
 struct PerFrameUniforms
 {
-    mat4 mWorld;
     mat4 mView;
     mat4 mProj;
+    // TODO(caio): Pass precalculated matrices
+    // (inverses, tranpose inverse for normals, composites, etc.)
 
     vec4 mCamWorldPos;
     vec4 mLight1;

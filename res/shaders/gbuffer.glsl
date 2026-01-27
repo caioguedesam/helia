@@ -31,7 +31,7 @@ void main()
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * node.mTransform * vec4(inPosition, 1.0f);
 
-    outNormal = inNormal;
+    outNormal = transpose(inverse(mat3(node.mTransform))) * inNormal;
 }
 #endif  // VERTEX_SHADER
 

@@ -604,7 +604,6 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
 {
     uint32 activeFrame = pSceneRenderer->pRenderer->mActiveFrame;
-    pSceneRenderer->perFrameUniforms[activeFrame].mWorld = identity();
     pSceneRenderer->perFrameUniforms[activeFrame].mView = getView(&pSceneRenderer->mCamera);
     pSceneRenderer->perFrameUniforms[activeFrame].mProj = getProj(&pSceneRenderer->mCamera);
 

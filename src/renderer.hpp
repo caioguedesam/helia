@@ -16,7 +16,6 @@ struct DirectionalLight
 
 struct PerFrameUniforms
 {
-    m4f mWorld = {};
     m4f mView = {};
     m4f mProj = {};
 
