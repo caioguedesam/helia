@@ -18,7 +18,7 @@ struct SceneMesh
 struct SceneMaterial
 {
     v4f     mBaseColor = {1,1,1,1};
-    float   mMetallic = 0.f;
+    float   mMetallic = 1.f;
     float   mRoughness = 1.f;
 
     uint32  mBaseColorTexture           = FALLBACK_BASECOLOR_INDEX;

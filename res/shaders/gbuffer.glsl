@@ -104,7 +104,7 @@ void main()
         discard;
     }
 
-    outGBufferA = vec4(baseColor.rgb, 1.0);
+    outGBufferA = vec4(baseColor.rgb * material.mBaseColor.rgb, 1.0);
 
     // Normals
     vec3 vertexNormal = inNormal;
@@ -137,6 +137,8 @@ void main()
     vec4 metallicRoughness = texture(
             sampler2D(materialMaps[material.mMetallicRoughnessTexId], samplerLinear),
             inUV);
-    outGBufferC = vec2(metallicRoughness.gb);
+    outGBufferC = vec2(
+            metallicRoughness.g * material.mRoughness,
+            metallicRoughness.b * material.mMetallic);
 }
 #endif  // PIXEL_SHADER
