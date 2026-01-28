@@ -61,6 +61,35 @@ struct IndirectDraw
     uint  mFirstInstance;
 };
 
+vec2 EncodeNormal(vec3 n)
+{
+    // Sphere to octahedron
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+
+    // Octahedron to quad (reflect negative z)
+    n.xy = n.z >= 0.0
+        ? n.xy
+        : (1.0 - abs(n.yx)) * sign(n.xy);
+
+    // [-1, 1] to [0, 1]
+    return n.xy * 0.5 + 0.5;
+}
+
+vec3 DecodeNormal(vec2 o)
+{
+    // [0, 1] to [-1, 1]
+    o = o * 2.0f - 1.0f;
+
+    // https://twitter.com/Stubbesaurus/status/937994790553227264
+    vec3 n = vec3(o.x, o.y, 1.0 - abs(o.x) - abs(o.y));
+
+    n.xy = n.z >= 0
+        ? n.xy
+        : (1.0 - abs(n.yx)) * sign(n.xy);
+
+    return normalize(n);
+}
+
 // Common resource sets
 // 0 -> Per Frame Resources
 DEFINE_UNIFORM_BLOCK(0, 0)
@@ -112,6 +141,5 @@ DEFINE_SAMPLER(1, 9) samplerPoint;
 
 DEFINE_TEXTURE2D(1, 10) gbufferA;
 DEFINE_TEXTURE2D(1, 11) gbufferB;
-DEFINE_TEXTURE2D(1, 12) gbufferC;
-DEFINE_TEXTURE2D(1, 13) depthBuffer;
-DEFINE_TEXTURE2D(1, 14) lightingAccum;
+DEFINE_TEXTURE2D(1, 12) depthBuffer;
+DEFINE_TEXTURE2D(1, 13) lightingAccum;

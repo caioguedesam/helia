@@ -104,8 +104,6 @@ void main()
         discard;
     }
 
-    outGBufferA = vec4(baseColor.rgb * material.mBaseColor.rgb, 1.0);
-
     // Normals
     vec3 vertexNormal = inNormal;
 #if VERTEX_TANGENTS
@@ -131,14 +129,18 @@ void main()
     vec3 normalMap = texture(sampler2D(materialMaps[material.mNormalTexId], samplerLinear), inUV).rgb;
     normalMap = normalize(normalMap * 2.0f - 1.0f);
     vec3 normal = normalize(TBN * normalMap);
-    outGBufferB = vec4(normal, 0.0);
 
     // Metallic + Roughness
     vec4 metallicRoughness = texture(
             sampler2D(materialMaps[material.mMetallicRoughnessTexId], samplerLinear),
             inUV);
-    outGBufferC = vec2(
-            metallicRoughness.g * material.mRoughness,
-            metallicRoughness.b * material.mMetallic);
+
+    // Writing outputs to GBuffer
+    outGBufferA = vec4(baseColor.rgb * material.mBaseColor.rgb,
+            metallicRoughness.g * material.mRoughness);
+
+    outGBufferB = vec4(EncodeNormal(normal),
+            metallicRoughness.b * material.mMetallic,
+            0.0);
 }
 #endif  // PIXEL_SHADER

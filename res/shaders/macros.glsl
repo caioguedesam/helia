@@ -1,6 +1,7 @@
 #define PI 3.1415926535
 #define EPSILON 0.000001
 #define dot_c(A, B) max(dot((A), (B)), 0.0)
+#define saturate(X) clamp(X, 0.0, 1.0)
 
 #define CONCAT_(A, B) A##B
 #define CONCAT(A, B) CONCAT_(A, B)

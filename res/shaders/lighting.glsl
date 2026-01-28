@@ -101,11 +101,14 @@ void main()
 {
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
 
+    vec4 sampleA = texture(sampler2D(gbufferA, samplerLinear), inUV);   // rgb = Diffuse color, a = Metallic
+    vec4 sampleB = texture(sampler2D(gbufferB, samplerLinear), inUV);   // rg = Encoded normal, b = Roughness
+    float depth = texture(sampler2D(depthBuffer, samplerLinear), inUV).r;
+
     // BRDF inputs
     vec3 L = normalize(-perFrame.mLight1.xyz);
-    vec3 N = texture(sampler2D(gbufferB, samplerLinear), inUV).xyz;
+    vec3 N = DecodeNormal(sampleB.xy);
 
-    float depth = texture(sampler2D(depthBuffer, samplerLinear), inUV).r;
     vec3 worldPos = worldPositionFromDepth(depth, inUV, perFrame.mView, perFrame.mProj);
     vec3 camPos = perFrame.mCamWorldPos.xyz;
 
@@ -113,16 +116,14 @@ void main()
     vec3 H = normalize(V + L);
 
     float NoV = abs(dot(N, V)) + 1e-5;
-    //float NoV = clamp(dot(N, V), 0.0f, 1.0f);
     float NoL = clamp(dot(N, L), 0.0f, 1.0f);
     float NoH = clamp(dot(N, H), 0.0f, 1.0f);
     float LoH = clamp(dot(L, H), 0.0f, 1.0f);
 
-    vec3 surfaceColor = texture(sampler2D(gbufferA, samplerLinear), inUV).rgb;
-    vec3 surfaceParams = texture(sampler2D(gbufferC, samplerLinear), inUV).rgb;
-    float roughness = surfaceParams.r;
+    vec3 surfaceColor = sampleA.rgb;
+    float roughness = sampleA.a;
     roughness *= roughness;     // Linear roughness -> Perceptual roughness
-    float metallic = surfaceParams.g;
+    float metallic = sampleB.b;
 
     // Specular BRDF
     vec3 Fr = specularBRDF(NoH, NoV, NoL, LoH, surfaceColor, roughness, metallic);
@@ -142,35 +143,6 @@ void main()
     result.rgb += (Fr + Fd) * NoL * intensity * lightColor; 
 
     outColor = vec4(result.rgb, 1.0f);
-
-#if 0
-    vec3 lightColor = perFrame.mLight2.rgb;
-
-    // Ambient light
-    vec3 ambientLight = perFrame.mLight2.w * lightColor;
-
-    // Diffuse light
-    vec3 L = -(perFrame.mLight1.xyz);
-    vec3 N = texture(sampler2D(gbufferB, samplerLinear), inUV).xyz;
-    float NoL = dot(N, L);
-    float diffuse = max(NoL, 0.0f);
-    vec3 diffuseLight = diffuse * perFrame.mLight1.w * lightColor;
-
-    // Specular light
-    float depth = texture(sampler2D(depthBuffer, samplerLinear), inUV).r;
-    vec3 worldPos = worldPositionFromDepth(depth, inUV, perFrame.mView, perFrame.mProj);
-    vec3 camPos = perFrame.mCamWorldPos.xyz;
-    vec3 V = normalize(camPos - worldPos);
-    vec3 R = reflect(-L, N);
-    float specular = pow(max(dot(V, R), 0.0), 32);
-    vec3 specularLight = specular * lightColor;
-
-    vec3 surfaceColor = texture(sampler2D(gbufferA, samplerLinear), inUV).rgb;
-
-    vec4 result;
-    result.rgb = (ambientLight + diffuseLight + specularLight) * surfaceColor;
-    outColor = vec4(result.rgb, 1.0f);
-#endif
 }
 
 #endif // PIXEL_SHADER

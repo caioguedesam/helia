@@ -249,8 +249,8 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
     // Accumulation buffer
     {
         RenderTargetDesc desc = {};
-        // TODO(caio): Optimize render target formats
-        desc.mFormat = FORMAT_RGBA32_FLOAT;
+        //desc.mFormat = FORMAT_RGBA32_SFLOAT;
+        desc.mFormat = FORMAT_B10G11R11_UFLOAT;
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
@@ -260,18 +260,16 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
     // Geometry pass RT
     {
         RenderTargetDesc desc = {};
-        desc.mFormat = FORMAT_RGBA8_UNORM;
+        //desc.mFormat = FORMAT_RGBA8_UNORM;
+        desc.mFormat = FORMAT_RGBA8_SRGB;
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferA);
-        // TODO(caio): Optimize render target formats
-        desc.mFormat = FORMAT_RGBA32_FLOAT;
+        desc.mFormat = FORMAT_A2RGB10_UNORM;
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferB);
-        desc.mFormat = FORMAT_RG32_FLOAT;
-        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferC);
 
-        desc.mFormat = FORMAT_D32_FLOAT;
+        desc.mFormat = FORMAT_D32_SFLOAT;
         desc.mClear.mDepth = 0;
         addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferDepth);
     }
@@ -291,12 +289,11 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         CommandBuffer* pCmd = getCmd(pSceneRenderer->pRenderer, true);
         beginCmd(pCmd);
 
-        RenderTargetBarrier barriers[5];
+        RenderTargetBarrier barriers[4];
         barriers[0] = {pSceneRenderer->pRTGBufferA,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         barriers[1] = {pSceneRenderer->pRTGBufferB,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[2] = {pSceneRenderer->pRTGBufferC,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[3] = {pSceneRenderer->pRTGBufferDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[4] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[2] = {pSceneRenderer->pRTGBufferDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[3] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         endCmd(pCmd);
@@ -393,7 +390,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     if(!pSceneRenderer->pDSGlobal)
     {
         DescriptorSetDesc desc = {};
-        desc.mCount = 15;
+        desc.mCount = 14;
         // TODO(caio): Buffer arrays?
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaque, 1 };
         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 1 };
@@ -409,9 +406,8 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[9] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
         desc.mResources[10] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
         desc.mResources[11] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
-        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferC->pTexture, 1 };
-        desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferDepth->pTexture, 1 };
-        desc.mResources[14] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
+        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferDepth->pTexture, 1 };
+        desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
     }
 
@@ -430,10 +426,9 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     // GBuffer pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 3;
+        desc.mRenderTargetCount = 2;
         desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferA->mDesc.mFormat;
         desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferB->mDesc.mFormat;
-        desc.mRenderTargetFormats[2] = pSceneRenderer->pRTGBufferC->mDesc.mFormat;
         desc.mDepthTargetFormat = pSceneRenderer->pRTGBufferDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
@@ -554,7 +549,6 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTAccum);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferC);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferDepth);
 }
 
@@ -674,23 +668,20 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     {
         RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
         RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-        RenderTarget* pRTGBufferC = pSceneRenderer->pRTGBufferC;
         RenderTarget* pRTDepth = pSceneRenderer->pRTGBufferDepth;
 
         GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBufferOpaque;
 
-        RenderTargetBarrier barriers[4];
+        RenderTargetBarrier barriers[3];
         barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_COLOR_OUTPUT };
         barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_COLOR_OUTPUT };
-        barriers[2] = {pRTGBufferC, getImageLayout(pRTGBufferC), IMAGE_LAYOUT_COLOR_OUTPUT };
-        barriers[3] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         RenderTargetBindDesc bindDesc = {};
-        bindDesc.mColorCount = 3;
+        bindDesc.mColorCount = 2;
         bindDesc.mColorBindings[0] = { pRTGBufferA, LOAD_OP_CLEAR, STORE_OP_STORE };
         bindDesc.mColorBindings[1] = { pRTGBufferB, LOAD_OP_CLEAR, STORE_OP_STORE };
-        bindDesc.mColorBindings[2] = { pRTGBufferC, LOAD_OP_CLEAR, STORE_OP_STORE };
         bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
         cmdBindRenderTargets(pCmd, bindDesc);
 
@@ -732,18 +723,16 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     {
         RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
         RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-        RenderTarget* pRTGBufferC = pSceneRenderer->pRTGBufferC;
         RenderTarget* pRTDepth = pSceneRenderer->pRTGBufferDepth;
         RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
 
         GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;
 
-        RenderTargetBarrier barriers[5];
+        RenderTargetBarrier barriers[4];
         barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_SHADER_READ_ONLY };
         barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        barriers[2] = {pRTGBufferC, getImageLayout(pRTGBufferC), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        barriers[3] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        barriers[4] = {pRTAccum, getImageLayout(pRTAccum), IMAGE_LAYOUT_COLOR_OUTPUT };
+        barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[3] = {pRTAccum, getImageLayout(pRTAccum), IMAGE_LAYOUT_COLOR_OUTPUT };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         RenderTargetBindDesc bindDesc = {};

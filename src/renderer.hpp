@@ -84,7 +84,6 @@ struct SceneRenderer
     // GBuffer draw pass
     RenderTarget* pRTGBufferA = NULL;
     RenderTarget* pRTGBufferB = NULL;
-    RenderTarget* pRTGBufferC = NULL;
     RenderTarget* pRTGBufferDepth = NULL;
     Shader* pVSGBufferOpaque = NULL;
     Shader* pPSGBufferOpaque = NULL;
