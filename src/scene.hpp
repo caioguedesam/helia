@@ -41,6 +41,12 @@ struct SceneNode
     uint32 mPadding0[2];
 };
 
+struct MaterialTextureInfo
+{
+    String mPath = {};
+    uint32 mFormat = 0; 
+};
+
 #define SCENE_MAX_NODES 1024
 #define SCENE_MAX_MESHES SCENE_MAX_NODES
 #define SCENE_MAX_MATERIALS SCENE_MAX_NODES
@@ -62,9 +68,12 @@ struct Scene
     void* pIndexData = NULL;
     uint64 vertexCount = 0;
     uint64 indexCount = 0;
+
+    MaterialTextureInfo mTexInfos[SCENE_MAX_TEXTURES];
+    uint32 mTexCount = 0;
 };
 
 void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize);
 void destroyScene(Scene* pScene);
 
-void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32* pTexCount);
+void setupSceneModel(Scene* pScene, String modelPath);

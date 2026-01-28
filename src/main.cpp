@@ -93,9 +93,9 @@ void init()
     String texPaths[SCENE_MAX_TEXTURES];
     uint32 texCount = 0;
     String modelPath = str("../../res/models/sponza/glTF/Sponza.gltf");
-    setupSceneModel(&gScene, modelPath, texPaths, &texCount);
+    setupSceneModel(&gScene, modelPath);
     initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gScene, 
-            getFileDir(modelPath), texPaths, texCount);
+            getFileDir(modelPath));
 
     addRenderTargets();
     addShaders();

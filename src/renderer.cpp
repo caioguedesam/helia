@@ -9,13 +9,13 @@
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
         Scene* pScene, 
-        String rootPath, String* pTexPaths, uint32 texCount)
+        String rootPath)
 {
     PROFILE_SCOPE;
 
     ASSERT(pSceneRenderer);
     ASSERT(pApp && pRenderer && pAssetManager && pScene);
-    ASSERT(texCount + FALLBACK_TEXTURE_COUNT < SCENE_MAX_TEXTURES);  // Textures + fallbacks can't exceed max
+    ASSERT(pScene->mTexCount + FALLBACK_TEXTURE_COUNT < SCENE_MAX_TEXTURES);  // Textures + fallbacks can't exceed max
     pSceneRenderer->pApp = pApp;
     pSceneRenderer->pRenderer = pRenderer;
     pSceneRenderer->pAssetManager = pAssetManager;
@@ -24,14 +24,15 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Load textures from scene model
     {
         PROFILE_SCOPE_NAME("initSceneRenderer::Load Textures");
-        pSceneRenderer->mMaterialMapCount = texCount + FALLBACK_TEXTURE_COUNT;
-        for(uint32 t = 0; t < texCount; t++)
+        pSceneRenderer->mMaterialMapCount = pScene->mTexCount + FALLBACK_TEXTURE_COUNT;
+        for(uint32 t = 0; t < pScene->mTexCount; t++)
         {
             PROFILE_SCOPE_NAME("initSceneRenderer::Load Texture");
             Texture* pTex = NULL;
             char buf[256];
-            String texPath = strf(buf, "%.*s/%.*s", STRF_ARG(rootPath), STRF_ARG(pTexPaths[t]));
-            loadTexture(pAssetManager, pRenderer, texPath, false, &pTex);
+            MaterialTextureInfo texInfo = pScene->mTexInfos[t];
+            String texPath = strf(buf, "%.*s/%.*s", STRF_ARG(rootPath), STRF_ARG(texInfo.mPath));
+            loadTexture(pAssetManager, pRenderer, texPath, (ImageFormat)texInfo.mFormat, false, &pTex);
             pSceneRenderer->pTexMaterialMaps[t + FALLBACK_TEXTURE_COUNT] = pTex;
         }
     }
@@ -40,15 +41,15 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     {
         Texture* pTexFallbackBaseColor = NULL;
         loadTexture(pAssetManager, pRenderer, str("../../res/textures/white.png"),
-                false, &pTexFallbackBaseColor);
+                FORMAT_RGBA8_SRGB, false, &pTexFallbackBaseColor);
 
         Texture* pTexFallbackNormal = NULL;
         loadTexture(pAssetManager, pRenderer, str("../../res/textures/flat_normal.png"),
-                false, &pTexFallbackNormal);
+                FORMAT_RGBA8_UNORM, false, &pTexFallbackNormal);
 
         Texture* pTexFallbackMRS = NULL;
         loadTexture(pAssetManager, pRenderer, str("../../res/textures/black.png"),
-                false, &pTexFallbackMRS);
+                FORMAT_RGBA8_UNORM, false, &pTexFallbackMRS);
 
         pSceneRenderer->pTexMaterialMaps[FALLBACK_BASECOLOR_INDEX] = pTexFallbackBaseColor;
         pSceneRenderer->pTexMaterialMaps[FALLBACK_NORMAL_INDEX] = pTexFallbackNormal;

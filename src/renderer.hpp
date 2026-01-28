@@ -110,7 +110,7 @@ struct SceneRenderer
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
         Scene* pScene, 
-        String rootPath, String* pTexPaths, uint32 texCount);
+        String rootPath);
 void destroySceneRenderer(SceneRenderer* pSceneRenderer);
 
 void addSceneRenderTargets(SceneRenderer* pSceneRenderer);

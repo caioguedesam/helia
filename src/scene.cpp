@@ -4,6 +4,7 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/file.hpp"
 #include "../dw/src/core/hash_map.hpp"
+#include "../dw/src/render/texture.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -90,7 +91,7 @@ int32 getAccessorBufferIndex(cgltf_accessor* pAccessor, cgltf_data* pGltfData)
     return -1;
 }
 
-void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32* pTexCount)
+void setupSceneModel(Scene* pScene, String modelPath)
 {
     // Load model asset to scratch memory
     ARENA_CHECKPOINT_SET(&pScene->mTempArena, sceneModel);
@@ -114,13 +115,17 @@ void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32*
     ASSERT(result == cgltf_result_success);
 
     // Save texture indices in array so we can load them later
+    HashMap<String, uint32> texInfoByPath = hashmap<String, uint32>(&pScene->mTempArena, SCENE_MAX_TEXTURES);
     // TODO(caio): Samplers
     for(cgltf_size t = 0; t < pGltfData->textures_count; t++)
     {
         cgltf_image* pTexImage = pGltfData->textures[t].image;
-        pTexPaths[t] = str(pTexImage->uri);
+        MaterialTextureInfo info = {};
+        info.mPath = str(pTexImage->uri);
+        pScene->mTexInfos[t] = info;
+        texInfoByPath.insert(info.mPath, t);
     }
-    *pTexCount = pGltfData->textures_count;
+    pScene->mTexCount = pGltfData->textures_count;
 
     // Create all scene materials
     for(cgltf_size m = 0; m < pGltfData->materials_count; m++)
@@ -141,14 +146,20 @@ void setupSceneModel(Scene* pScene, String modelPath, String* pTexPaths, uint32*
         if(pPBR->base_color_texture.texture)
         {
             mat.mBaseColorTexture = cgltf_texture_index(pGltfData, pPBR->base_color_texture.texture) + FALLBACK_TEXTURE_COUNT;
+            uint32 texInfoId = texInfoByPath[str(pPBR->base_color_texture.texture->image->uri)];
+            pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_SRGB;
         }
         if(pPBR->metallic_roughness_texture.texture)
         {
             mat.mMetallicRoughnessTexture = cgltf_texture_index(pGltfData, pPBR->metallic_roughness_texture.texture) + FALLBACK_TEXTURE_COUNT;
+            uint32 texInfoId = texInfoByPath[str(pPBR->metallic_roughness_texture.texture->image->uri)];
+            pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
         }
         if(pMat->normal_texture.texture)
         {
             mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture) + FALLBACK_TEXTURE_COUNT;
+            uint32 texInfoId = texInfoByPath[str(pMat->normal_texture.texture->image->uri)];
+            pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
         }
         if(pMat->alpha_mode != cgltf_alpha_mode_opaque)
         {
