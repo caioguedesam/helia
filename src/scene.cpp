@@ -5,6 +5,7 @@
 #include "../dw/src/core/file.hpp"
 #include "../dw/src/core/hash_map.hpp"
 #include "../dw/src/render/texture.hpp"
+#include "dw/src/math/volumes.hpp"
 
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
@@ -298,9 +299,23 @@ void setupSceneModel(Scene* pScene, String modelPath)
             ASSERT(pPrimitive->material);
             materialIdx = (uint32)cgltf_material_index(pGltfData, pPrimitive->material);
 
-            m4f transform;
-            cgltf_node_transform_world(pNode, &transform.mData[0]);
-            SceneNode sceneNode = { transform, meshIdx, materialIdx };
+            m4f xform;
+            cgltf_node_transform_world(pNode, &xform.mData[0]);
+
+            cgltf_accessor* pAccPos = NULL;
+            for(cgltf_size a = 0; a < pPrimitive->attributes_count; a++)
+            {
+                cgltf_attribute* pAttr = &pPrimitive->attributes[a];
+                if(pAttr->type == cgltf_attribute_type_position)
+                {
+                    pAccPos = pAttr->data;
+                }
+            }
+            ASSERT(pAccPos && pAccPos->has_min && pAccPos->has_max);
+            AABB aabb = { to3f(pAccPos->min), to3f(pAccPos->max) };
+            aabb = transformAABB(aabb, xform);
+
+            SceneNode sceneNode = { xform, to4f(aabb.min, 1), to4f(aabb.max, 1), meshIdx, materialIdx };
             pScene->mNodes[pScene->mNodeCount++] = sceneNode;
         }
     }

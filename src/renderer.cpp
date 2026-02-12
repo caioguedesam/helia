@@ -5,6 +5,10 @@
 #include "../dw/src/render/ui.hpp"
 #include "../dw/src/render/texture.hpp"
 #include "../dw/src/core/base.hpp"
+#include "dw/src/math/math.hpp"
+#include "dw/src/math/volumes.hpp"
+#include "dw/src/render/buffer.hpp"
+#include "dw/src/render/camera.hpp"
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
@@ -76,6 +80,15 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         initVertexLayout(desc, &pSceneRenderer->mVLScreenQuad);
     }
 
+    // Debug vertex layout
+    {
+        VertexLayoutDesc desc = {};
+        desc.mCount = 2;
+        desc.mAttribs[0] = ATTRIBUTE_FLOAT3;    // Position
+        desc.mAttribs[1] = ATTRIBUTE_FLOAT3;    // Color
+        initVertexLayout(desc, &pSceneRenderer->mVLDebug);
+    }
+
     // Screen quad vertex/index buffers
     {
         // Screen quad is a triangle in NDC, which is parially rendered to avoid overdraw.
@@ -104,6 +117,16 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         ibDesc.mCount = ARR_LEN(indexData);
         ibDesc.mStride = sizeof(uint16);
         addBuffer(pRenderer, ibDesc, &pSceneRenderer->pIBScreenQuad, indexData);
+    }
+
+    // Debug vertex buffer
+    {
+        BufferDesc vbDesc = {};
+        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mSize = MAX_DEBUG_VERTS;
+        vbDesc.mCount = MAX_DEBUG_VERTS / 6;
+        vbDesc.mStride = sizeof(float);     // Should this be * 6?
+        addBuffer(pRenderer, vbDesc, &pSceneRenderer->pVBDebug);
     }
 
     // Geometry vertex/index buffers
@@ -212,6 +235,8 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     pSceneRenderer->mDirLight = light;
     pSceneRenderer->mAmbient = 0.05f;
 
+    pSceneRenderer->mDebugVerts = array<float>(&pApp->mAppArena, MAX_DEBUG_VERTS);
+
     initGpuTimer(pRenderer, &pSceneRenderer->mGpuTimer);
 }
 
@@ -235,6 +260,7 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
     removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdsOpaque);
     removeBuffer(pRenderer, &pSceneRenderer->pVBScreenQuad);
     removeBuffer(pRenderer, &pSceneRenderer->pIBScreenQuad);
+    removeBuffer(pRenderer, &pSceneRenderer->pVBDebug);
     removeBuffer(pRenderer, &pSceneRenderer->pVBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pIBSceneGeometry);
     removeBuffer(pRenderer, &pSceneRenderer->pSBSceneMaterials);
@@ -306,6 +332,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
     String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
+    String debugShaderPath = str("../../res/shaders/debug.glsl");
     String tonemappingShaderPath = str("../../res/shaders/tone_mapping.glsl");
     if(!pSceneRenderer->pVSGBufferOpaque)
     {
@@ -365,6 +392,22 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
                 lightingShaderPath, 
                 SHADER_TYPE_FRAG, NULL, 0,
                 &pSceneRenderer->pPSLighting);
+    }
+
+    if(!pSceneRenderer->pVSDebug)
+    {
+        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                debugShaderPath, 
+                SHADER_TYPE_VERT, NULL, 0,
+                &pSceneRenderer->pVSDebug);
+    }
+
+    if(!pSceneRenderer->pPSDebug)
+    {
+        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                debugShaderPath, 
+                SHADER_TYPE_FRAG, NULL, 0,
+                &pSceneRenderer->pPSDebug);
     }
 
     if(!pSceneRenderer->pVSTonemapping)
@@ -478,9 +521,10 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
         // Constants:
         // - Total node count (uint32)
+        // - Active frame (uint32)
         desc.mConstantBlockCount = 1;
         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_COMP;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDraws);
     }
@@ -513,6 +557,38 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeLighting);
+    }
+
+    if(!pSceneRenderer->pPipeDebug)
+    {
+        GraphicsPipelineDesc desc = {};
+
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccum->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLDebug;
+        desc.pVS = pSceneRenderer->pVSDebug;
+        desc.pFS = pSceneRenderer->pPSDebug;
+
+        desc.mCullMode = CULL_MODE_NONE;
+        desc.mFrontFace = FRONT_FACE_CCW;
+        desc.mFillMode = FILL_MODE_LINE;
+        desc.mLineWidth = 2.f;
+
+        desc.mDepthTest = false;
+        desc.mDepthWrite = false;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+
+        // Constants:
+        // - Active frame (uint32)
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+
+        addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeDebug);
     }
 
     if(!pSceneRenderer->pPipeTonemapping)
@@ -568,6 +644,10 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSLighting);
     if(pSceneRenderer->pPSLighting)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSLighting);
+    if(pSceneRenderer->pVSDebug)
+        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSDebug);
+    if(pSceneRenderer->pPSDebug)
+        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSDebug);
     if(pSceneRenderer->pVSTonemapping)
         removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSTonemapping);
     if(pSceneRenderer->pPSTonemapping)
@@ -592,6 +672,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
     if(pSceneRenderer->pPipeLighting)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeLighting);
+    if(pSceneRenderer->pPipeDebug)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeDebug);
     if(pSceneRenderer->pPipeTonemapping)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeTonemapping);
 }
@@ -599,10 +681,19 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
 {
     uint32 activeFrame = pSceneRenderer->pRenderer->mActiveFrame;
-    pSceneRenderer->perFrameUniforms[activeFrame].mView = getView(&pSceneRenderer->mCamera);
-    pSceneRenderer->perFrameUniforms[activeFrame].mProj = getProj(&pSceneRenderer->mCamera);
-
+    m4f cameraView = getView(&pSceneRenderer->mCamera);
+    m4f cameraProj = getProj(&pSceneRenderer->mCamera);
+    pSceneRenderer->perFrameUniforms[activeFrame].mView = cameraView;
+    pSceneRenderer->perFrameUniforms[activeFrame].mProj = cameraProj;
     pSceneRenderer->perFrameUniforms[activeFrame].mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
+    Frustum cameraFrustum = getFrustum(&pSceneRenderer->mCamera);
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[0] = cameraFrustum.planes[0];
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[1] = cameraFrustum.planes[1];
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[2] = cameraFrustum.planes[2];
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[3] = cameraFrustum.planes[3];
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[4] = cameraFrustum.planes[4];
+    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[5] = cameraFrustum.planes[5];
+
     DirectionalLight light = pSceneRenderer->mDirLight;
     pSceneRenderer->perFrameUniforms[activeFrame].mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
     pSceneRenderer->perFrameUniforms[activeFrame].mDirLight2 = to4f(light.mColor, pSceneRenderer->mAmbient);
@@ -617,6 +708,202 @@ void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
             sizeof(PerFrameUniforms) * activeFrame, 
             &pSceneRenderer->perFrameUniforms[activeFrame], 
             sizeof(PerFrameUniforms));
+}
+
+void debugAddVertex(SceneRenderer* pSceneRenderer, v3f pos, v3f col)
+{
+    pSceneRenderer->mDebugVerts.push(pos.x);
+    pSceneRenderer->mDebugVerts.push(pos.y);
+    pSceneRenderer->mDebugVerts.push(pos.z);
+    pSceneRenderer->mDebugVerts.push(col.x);
+    pSceneRenderer->mDebugVerts.push(col.y);
+    pSceneRenderer->mDebugVerts.push(col.z);
+}
+
+void debugAddTri(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f col)
+{
+    // CCW p0 > p1 > p2
+    debugAddVertex(pSceneRenderer, p0, col);
+    debugAddVertex(pSceneRenderer, p2, col);
+    debugAddVertex(pSceneRenderer, p1, col);
+}
+
+void debugAddSphere(SceneRenderer* pSceneRenderer, v3f center, float radius, v3f col, uint32 stacks, uint32 slices)
+{
+    for(uint32 st = 0; st < stacks; st++)
+    {
+        float theta0 = ((float)st / stacks) * PI;
+        float theta1 = ((float)(st + 1) / stacks) * PI;
+
+        for(uint32 sl = 0; sl < slices; sl++)
+        {
+            float phi0 = ((float)sl / slices) * PI * 2;
+            float phi1 = ((float)(sl + 1) / slices) * PI * 2;
+
+            v3f v0 = fromPolar(radius, theta0, phi0) + center;
+            v3f v1 = fromPolar(radius, theta0, phi1) + center;
+            v3f v2 = fromPolar(radius, theta1, phi0) + center;
+            v3f v3 = fromPolar(radius, theta1, phi1) + center;
+
+            if(st == 0)
+            {
+                debugAddTri(pSceneRenderer, v0, v2, v3, col);
+            }
+            else if(st + 1 == stacks)
+            {
+                debugAddTri(pSceneRenderer, v2, v0, v1, col);
+            }
+            else
+            {
+                debugAddTri(pSceneRenderer, v0, v1, v3, col);
+                //debugAddTri(pSceneRenderer, v0, v2, v3, col);
+            }
+        }
+    }
+}
+
+void debugAddPoint(SceneRenderer* pSceneRenderer, v3f p, v3f col)
+{
+    debugAddSphere(pSceneRenderer, p, 0.05f, col, 4, 4);
+}
+
+void debugAddCylinder(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radius, v3f color, uint32 divs)
+{
+    v3f centerBottom = start;
+    v3f centerTop = start + dir;
+
+    v3f z = normalize(dir);
+    v3f x = normalize(cross(dir, {0,1,0}));
+    v3f y = normalize(cross(x, z));
+
+    if(magn(x) < 0.00001f)  // Edge case: dir is {0, 1, 0}
+    {
+        x = normalize(cross({0, 0, 1}, dir));
+        y = normalize(cross(x, z));
+    }
+
+    for(uint32 div = 0; div < divs; div++)
+    {
+        float a0 = TO_RAD(360.f / divs) * div;
+        float a0x = radius * cosf(a0);
+        float a0y = radius * sinf(a0);
+
+        float a1 = TO_RAD(360.f / divs) * (div + 1);
+        float a1x = radius * cosf(a1);
+        float a1y = radius * sinf(a1);
+
+        v3f b0 = centerBottom + (a0x * x) + (a0y * y);
+        v3f b1 = centerBottom + (a1x * x) + (a1y * y);
+        v3f t0 = b0 + dir;
+        v3f t1 = b1 + dir;
+
+        debugAddTri(pSceneRenderer, centerBottom, b0, b1, color);
+        debugAddTri(pSceneRenderer, b0, t0, t1, color);
+        debugAddTri(pSceneRenderer, b0, b1, t1, color);
+        debugAddTri(pSceneRenderer, centerTop, t0, t1, color);
+    }
+}
+
+void debugAddCone(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radius, v3f color, uint32 divs)
+{
+    v3f centerBottom = start;
+    v3f centerTop = start + dir;
+
+    v3f z = normalize(dir);
+    v3f x = normalize(cross(dir, {0,1,0}));
+    v3f y = normalize(cross(x, z));
+
+    if(magn(x) < 0.00001f)  // Edge case: dir is {0, 1, 0}
+    {
+        x = normalize(cross({0, 0, 1}, dir));
+        y = normalize(cross(x, z));
+    }
+
+    for(uint32 div = 0; div < divs; div++)
+    {
+        float a0 = TO_RAD(360.f / divs) * div;
+        float a0x = radius * cosf(a0);
+        float a0y = radius * sinf(a0);
+
+        float a1 = TO_RAD(360.f / divs) * (div + 1);
+        float a1x = radius * cosf(a1);
+        float a1y = radius * sinf(a1);
+
+        v3f b0 = centerBottom + (a0x * x) + (a0y * y);
+        v3f b1 = centerBottom + (a1x * x) + (a1y * y);
+
+        debugAddTri(pSceneRenderer, centerBottom, b0, b1, color);
+        debugAddTri(pSceneRenderer, centerTop, b0, b1, color);
+    }
+}
+
+void debugAddVector(SceneRenderer* pSceneRenderer, v3f start, v3f dir, v3f color)
+{
+    float cylinderRadius = 0.005f;
+    debugAddCylinder(pSceneRenderer, start, dir, cylinderRadius, color, 12);
+    debugAddCone(pSceneRenderer, start + dir, normalize(dir) * 0.05f, cylinderRadius * 5, color, 12);
+}
+
+void debugAddPlane(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f p3, v3f color1, v3f color2)
+{
+    float cylinderRadius = 0.005f;
+    debugAddCylinder(pSceneRenderer, p0, p1 - p0, cylinderRadius, color1, 6);
+    debugAddCylinder(pSceneRenderer, p1, p3 - p1, cylinderRadius, color1, 6);
+    debugAddCylinder(pSceneRenderer, p3, p2 - p3, cylinderRadius, color1, 6);
+    debugAddCylinder(pSceneRenderer, p2, p0 - p2, cylinderRadius, color1, 6);
+
+    v3f c = p0 + (0.5f * (p3 - p0));
+    v3f n = normalize(cross(p1 - p0, p2 - p0));
+    debugAddVector(pSceneRenderer, c, n, color2);
+}
+
+void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color)
+{
+    AABB aabbWorld = transformAABB(aabb, xform);
+
+    v3f points[8] =
+    {
+        {aabbWorld.min.x, aabbWorld.min.y, aabbWorld.min.z},
+        {aabbWorld.max.x, aabbWorld.min.y, aabbWorld.min.z},
+        {aabbWorld.min.x, aabbWorld.max.y, aabbWorld.min.z},
+        {aabbWorld.max.x, aabbWorld.max.y, aabbWorld.min.z},
+        {aabbWorld.min.x, aabbWorld.min.y, aabbWorld.max.z},
+        {aabbWorld.max.x, aabbWorld.min.y, aabbWorld.max.z},
+        {aabbWorld.min.x, aabbWorld.max.y, aabbWorld.max.z},
+        {aabbWorld.max.x, aabbWorld.max.y, aabbWorld.max.z},
+    };
+
+    debugAddTri(pSceneRenderer, points[0], points[3], points[1], color);
+    debugAddTri(pSceneRenderer, points[0], points[2], points[3], color);
+    debugAddTri(pSceneRenderer, points[4], points[7], points[5], color);
+    debugAddTri(pSceneRenderer, points[4], points[6], points[7], color);
+    debugAddTri(pSceneRenderer, points[2], points[3], points[7], color);
+    debugAddTri(pSceneRenderer, points[2], points[7], points[6], color);
+    debugAddTri(pSceneRenderer, points[0], points[1], points[5], color);
+    debugAddTri(pSceneRenderer, points[0], points[5], points[4], color);
+    debugAddTri(pSceneRenderer, points[4], points[0], points[2], color);
+    debugAddTri(pSceneRenderer, points[4], points[2], points[6], color);
+    debugAddTri(pSceneRenderer, points[1], points[5], points[7], color);
+    debugAddTri(pSceneRenderer, points[1], points[7], points[3], color);
+}
+
+void debugGeometry(SceneRenderer* pSceneRenderer)
+{
+    pSceneRenderer->mDebugVerts.clear();
+
+    // Add debug geometry here
+
+    if(!pSceneRenderer->mDebugVerts.mCount)
+    {
+        return;
+    }
+
+    // Copying data to GPU vertex buffer
+    copyToBuffer(pSceneRenderer->pRenderer, 
+            pSceneRenderer->pVBDebug, 
+            0, 
+            pSceneRenderer->mDebugVerts.mData, 
+            pSceneRenderer->mDebugVerts.mCount * sizeof(float));
 }
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
@@ -648,7 +935,10 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
         cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
 
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &pSceneRenderer->pScene->mNodeCount);
+        uint32 constants[2];
+        constants[0] = pSceneRenderer->pScene->mNodeCount;
+        constants[1] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants[0]);
 
         cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
         cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
@@ -664,7 +954,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBarrier(pCmd, 1, &barrier);
     }
 
-    // Scene geometry render pass
+    // GBuffer render pass
     {
         RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
         RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
@@ -759,6 +1049,38 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("Lighting Pass"), &gpuTimerParams);
+    }
+
+    // Debug geometry pass
+    debugGeometry(pSceneRenderer);
+    if(pSceneRenderer->mDebugVerts.mCount)
+    {
+        RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDebug;
+
+        RenderTargetBindDesc bindDesc = {};
+        bindDesc.mColorCount = 1;
+        bindDesc.mColorBindings[0] = { pRTAccum, LOAD_OP_LOAD, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        cmdSetViewport(pCmd, pRTAccum);
+        cmdSetScissor(pCmd, pRTAccum);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBDebug);
+
+        uint32 constants[1];
+        constants[0] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
+
+        cmdDraw(pCmd, pSceneRenderer->mDebugVerts.mCount / 6, 1);
+
+        cmdUnbindRenderTargets(pCmd);
+        gpuTimestamp(str("Debug Pass"), &gpuTimerParams);
     }
 
     // Tone mapping pass

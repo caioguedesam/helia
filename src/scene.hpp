@@ -2,6 +2,7 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/string.hpp"
 #include "../dw/src/math/math.hpp"
+#include "../dw/src/math/volumes.hpp"
 
 struct SceneMesh
 {
@@ -35,6 +36,8 @@ struct SceneMaterial
 struct SceneNode
 {
     m4f mTransform      = identity();   // World-space transform
+    v4f mMinAABB        = {};
+    v4f mMaxAABB        = {};
     uint32 mMeshId      = MAX_UINT32;   // Index for this node's mesh in the scene
     uint32 mMaterialId  = MAX_UINT32;
 

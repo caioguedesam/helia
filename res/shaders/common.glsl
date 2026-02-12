@@ -10,6 +10,8 @@ struct SceneMesh
 struct SceneNode
 {
     mat4 mTransform;
+    vec4 mMinAABB;
+    vec4 mMaxAABB;
     uint mMeshId;
     uint mMaterialId;
 
@@ -43,7 +45,9 @@ struct PerFrameUniforms
     vec4 mLight1;
     vec4 mLight2;
 
-    STRUCT_PADDING_VEC4(0, 1);
+    vec4 mCameraFrustumPlanes[6];
+
+    STRUCT_PADDING_VEC4(0, 3);
 };
 
 struct PerDrawData

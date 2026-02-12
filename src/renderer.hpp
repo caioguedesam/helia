@@ -1,4 +1,5 @@
 #pragma once
+#include "../dw/src/core/array.hpp"
 #include "../dw/src/asset/asset.hpp"
 #include "../dw/src/render/buffer.hpp"
 #include "../dw/src/render/shader.hpp"
@@ -23,7 +24,9 @@ struct PerFrameUniforms
     v4f mDirLight1 = {0,0,0,1};          // xyz = Direction, w = Intensity
     v4f mDirLight2 = {1,1,1,0.05f};      // rgb = Color, a = Ambient factor
 
-    v4f mPadding0;
+    v4f mCameraFrustumPlanes[6];
+
+    v4f mPadding0[3];
 };
 
 struct PerDrawData
@@ -32,6 +35,7 @@ struct PerDrawData
     uint32 mNodeIdDoubleSided = MAX_UINT32;
 };
 
+#define MAX_DEBUG_VERTS 1000000
 struct SceneRenderer
 {
     // References
@@ -46,18 +50,21 @@ struct SceneRenderer
     DirectionalLight mDirLight = {};
     float mAmbient = 0.f;
     GpuTimer mGpuTimer = {};
+    Array<float> mDebugVerts;
 
     // Render resources
-    Buffer* pVBScreenQuad       = NULL;
-    Buffer* pIBScreenQuad       = NULL;
-    VertexLayout mVLScreenQuad = {};
-    Buffer* pVBSceneGeometry    = NULL;
-    Buffer* pIBSceneGeometry    = NULL;
-    VertexLayout mVLSceneGeometry = {};
-    Buffer* pSBSceneNodes       = NULL;
-    Buffer* pSBSceneMeshes      = NULL;
-    Buffer* pSBSceneMaterials   = NULL;
-    Buffer* pUBPerFrame         = NULL;
+    Buffer* pVBScreenQuad           = NULL;
+    Buffer* pIBScreenQuad           = NULL;
+    Buffer* pVBDebug                = NULL;
+    VertexLayout mVLScreenQuad      = {};
+    VertexLayout mVLDebug           = {};
+    Buffer* pVBSceneGeometry        = NULL;
+    Buffer* pIBSceneGeometry        = NULL;
+    VertexLayout mVLSceneGeometry   = {};
+    Buffer* pSBSceneNodes           = NULL;
+    Buffer* pSBSceneMeshes          = NULL;
+    Buffer* pSBSceneMaterials       = NULL;
+    Buffer* pUBPerFrame             = NULL;
 
     Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
     uint32 mMaterialMapCount = 0;
@@ -95,6 +102,11 @@ struct SceneRenderer
     Shader* pPSLighting = NULL;
     GraphicsPipeline* pPipeLighting = NULL;
 
+    // Debug pass
+    Shader* pVSDebug = NULL;
+    Shader* pPSDebug = NULL;
+    GraphicsPipeline* pPipeDebug = NULL;
+
     // Final present pass
     RenderTarget* pRTPresent = NULL;
     Shader* pVSTonemapping = NULL;
@@ -126,5 +138,16 @@ void removeSceneRenderResources(SceneRenderer* pSceneRenderer);
 
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer);
 void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer);
+
+void debugAddVertex(SceneRenderer* pSceneRenderer, v3f pos, v3f col);
+void debugAddTri(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f col);
+void debugAddSphere(SceneRenderer* pSceneRenderer, v3f center, float radius, v3f col, uint32 stacks, uint32 slices);
+void debugAddPoint(SceneRenderer* pSceneRenderer, v3f p, v3f col);
+void debugAddCylinder(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radius, v3f color, uint32 divs);
+void debugAddCone(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radius, v3f color, uint32 divs);
+void debugAddVector(SceneRenderer* pSceneRenderer, v3f start, v3f dir, v3f color);
+void debugAddPlane(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f p3, v3f color1, v3f color2);
+void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color);
+void debugGeometry(SceneRenderer* pSceneRenderer);
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame);
