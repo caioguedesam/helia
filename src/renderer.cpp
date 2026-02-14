@@ -9,6 +9,7 @@
 #include "dw/src/math/volumes.hpp"
 #include "dw/src/render/buffer.hpp"
 #include "dw/src/render/camera.hpp"
+#include "dw/src/render/shader.hpp"
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
         App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
@@ -297,7 +298,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
         desc.mFormat = FORMAT_D32_SFLOAT;
         desc.mClear.mDepth = 0;
-        addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferDepth);
+        addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneDepth);
     }
 
     // Final present RT
@@ -318,7 +319,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         RenderTargetBarrier barriers[4];
         barriers[0] = {pSceneRenderer->pRTGBufferA,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         barriers[1] = {pSceneRenderer->pRTGBufferB,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[2] = {pSceneRenderer->pRTGBufferDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[2] = {pSceneRenderer->pRTSceneDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         barriers[3] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
@@ -330,100 +331,57 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 void addSceneShaders(SceneRenderer* pSceneRenderer)
 {
     String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
+    String depthPrepassShaderPath = str("../../res/shaders/depth_prepass.glsl");
     String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
     String debugShaderPath = str("../../res/shaders/debug.glsl");
     String tonemappingShaderPath = str("../../res/shaders/tone_mapping.glsl");
-    if(!pSceneRenderer->pVSGBufferOpaque)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                gbufferShaderPath, 
-                SHADER_TYPE_VERT, NULL, 0,
-                &pSceneRenderer->pVSGBufferOpaque);
-    }
-
-    if(!pSceneRenderer->pPSGBufferOpaque)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                gbufferShaderPath, 
-                SHADER_TYPE_FRAG, NULL, 0,
-                &pSceneRenderer->pPSGBufferOpaque);
-    }
-
     String doubleSidedDefines[] =
     {
         str("DOUBLE_SIDED"),
     };
-    if(!pSceneRenderer->pVSGBufferOpaqueDoubleSided)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                gbufferShaderPath, 
-                SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines),
-                &pSceneRenderer->pVSGBufferOpaqueDoubleSided);
-    }
 
-    if(!pSceneRenderer->pPSGBufferOpaqueDoubleSided)
+    struct ShaderLoadDesc
     {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                gbufferShaderPath,
-                SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines),
-                &pSceneRenderer->pPSGBufferOpaqueDoubleSided);
-    }
+        String path;
+        ShaderType type;
+        String* pDefines = NULL;
+        uint32 defineCount = 0;
+        Shader** ppOut = NULL;
+    };
 
-    if(!pSceneRenderer->pCSGenerateDraws)
+    ShaderLoadDesc shaders[] =
     {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                generateDrawsShaderPath, 
-                SHADER_TYPE_COMP, NULL, 0,
-                &pSceneRenderer->pCSGenerateDraws);
-    }
+        {depthPrepassShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSDepthPrePass},
+        {depthPrepassShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSDepthPrePass},
+        {depthPrepassShaderPath, SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pVSDepthPrePassDoubleSided},
+        {depthPrepassShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSDepthPrePassDoubleSided},
 
-    if(!pSceneRenderer->pVSLighting)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                lightingShaderPath, 
-                SHADER_TYPE_VERT, NULL, 0,
-                &pSceneRenderer->pVSLighting);
-    }
+        {gbufferShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSGBuffer},
+        {gbufferShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSGBuffer},
+        {gbufferShaderPath, SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pVSGBufferDoubleSided},
+        {gbufferShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSGBufferDoubleSided},
 
-    if(!pSceneRenderer->pPSLighting)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                lightingShaderPath, 
-                SHADER_TYPE_FRAG, NULL, 0,
-                &pSceneRenderer->pPSLighting);
-    }
+        {generateDrawsShaderPath, SHADER_TYPE_COMP, NULL, 0, &pSceneRenderer->pCSGenerateDraws},
 
-    if(!pSceneRenderer->pVSDebug)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                debugShaderPath, 
-                SHADER_TYPE_VERT, NULL, 0,
-                &pSceneRenderer->pVSDebug);
-    }
+        {lightingShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSLighting},
+        {lightingShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSLighting},
 
-    if(!pSceneRenderer->pPSDebug)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                debugShaderPath, 
-                SHADER_TYPE_FRAG, NULL, 0,
-                &pSceneRenderer->pPSDebug);
-    }
+        {debugShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSDebug},
+        {debugShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSDebug},
 
-    if(!pSceneRenderer->pVSTonemapping)
-    {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                tonemappingShaderPath, 
-                SHADER_TYPE_VERT, NULL, 0,
-                &pSceneRenderer->pVSTonemapping);
-    }
+        {tonemappingShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSTonemapping},
+        {tonemappingShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSTonemapping},
+    };
 
-    if(!pSceneRenderer->pPSTonemapping)
+    for(uint32 i = 0; i < ARR_LEN(shaders); i++)
     {
-        loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
-                tonemappingShaderPath, 
-                SHADER_TYPE_FRAG, NULL, 0,
-                &pSceneRenderer->pPSTonemapping);
+        ShaderLoadDesc shader = shaders[i];
+        if(!(*shader.ppOut))
+        {
+            loadShader(pSceneRenderer->pAssetManager, pSceneRenderer->pRenderer, 
+                    shader.path, shader.type, shader.pDefines, shader.defineCount, shader.ppOut);
+        }
     }
 }
 
@@ -449,7 +407,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[9] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
         desc.mResources[10] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
         desc.mResources[11] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
-        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferDepth->pTexture, 1 };
+        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
         desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
     }
@@ -466,17 +424,15 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
 
 void addScenePipelines(SceneRenderer* pSceneRenderer)
 {
-    // GBuffer pass pipeline
+    // Depth pre-pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 2;
-        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferA->mDesc.mFormat;
-        desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferB->mDesc.mFormat;
-        desc.mDepthTargetFormat = pSceneRenderer->pRTGBufferDepth->mDesc.mFormat;
+        desc.mRenderTargetCount = 0;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
-        desc.pVS = pSceneRenderer->pVSGBufferOpaque;
-        desc.pFS = pSceneRenderer->pPSGBufferOpaque;
+        desc.pVS = pSceneRenderer->pVSDepthPrePass;
+        desc.pFS = pSceneRenderer->pPSDepthPrePass;
 
         desc.mCullMode = CULL_MODE_BACK;
         desc.mFrontFace = FRONT_FACE_CCW;
@@ -493,19 +449,65 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         // - Active frame (uint32)
         desc.mConstantBlockCount = 1;
         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
 
-        if(!pSceneRenderer->pPipeGBufferOpaque)
+        if(!pSceneRenderer->pPipeDepthPrePass)
         {
-            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGBufferOpaque);
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeDepthPrePass);
         }
 
         desc.mCullMode = CULL_MODE_NONE;
-        desc.pVS = pSceneRenderer->pVSGBufferOpaqueDoubleSided;
-        desc.pFS = pSceneRenderer->pPSGBufferOpaqueDoubleSided;
-        if(!pSceneRenderer->pPipeGBufferOpaqueDoubleSided)
+        desc.pVS = pSceneRenderer->pVSDepthPrePassDoubleSided;
+        desc.pFS = pSceneRenderer->pPSDepthPrePassDoubleSided;
+        if(!pSceneRenderer->pPipeDepthPrePassDoubleSided)
         {
-            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGBufferOpaqueDoubleSided);
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeDepthPrePassDoubleSided);
+        }
+    }
+
+    // GBuffer pass pipeline
+    {
+        GraphicsPipelineDesc desc = {};
+        desc.mRenderTargetCount = 2;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferA->mDesc.mFormat;
+        desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferB->mDesc.mFormat;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
+        desc.pVS = pSceneRenderer->pVSGBuffer;
+        desc.pFS = pSceneRenderer->pPSGBuffer;
+
+        desc.mCullMode = CULL_MODE_BACK;
+        desc.mFrontFace = FRONT_FACE_CCW;
+
+        //desc.mDepthTest = true;
+        //desc.mDepthWrite = true;
+        //desc.mDepthOp = COMPARE_GREATER;
+        desc.mDepthTest = true;
+        desc.mDepthWrite = false;
+        desc.mDepthOp = COMPARE_EQUAL;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+
+        // Constants:
+        // - Active frame (uint32)
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+
+        if(!pSceneRenderer->pPipeGBuffer)
+        {
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGBuffer);
+        }
+
+        desc.mCullMode = CULL_MODE_NONE;
+        desc.pVS = pSceneRenderer->pVSGBufferDoubleSided;
+        desc.pFS = pSceneRenderer->pPSGBufferDoubleSided;
+        if(!pSceneRenderer->pPipeGBufferDoubleSided)
+        {
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGBufferDoubleSided);
         }
     }
 
@@ -625,33 +627,37 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTAccum);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferDepth);
+    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTSceneDepth);
 }
 
 void removeSceneShaders(SceneRenderer* pSceneRenderer)
 {
-    if(pSceneRenderer->pVSGBufferOpaque)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSGBufferOpaque);
-    if(pSceneRenderer->pPSGBufferOpaque)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSGBufferOpaque);
-    if(pSceneRenderer->pVSGBufferOpaqueDoubleSided)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSGBufferOpaqueDoubleSided);
-    if(pSceneRenderer->pPSGBufferOpaqueDoubleSided)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSGBufferOpaqueDoubleSided);
-    if(pSceneRenderer->pCSGenerateDraws)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pCSGenerateDraws);
-    if(pSceneRenderer->pVSLighting)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSLighting);
-    if(pSceneRenderer->pPSLighting)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSLighting);
-    if(pSceneRenderer->pVSDebug)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSDebug);
-    if(pSceneRenderer->pPSDebug)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSDebug);
-    if(pSceneRenderer->pVSTonemapping)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pVSTonemapping);
-    if(pSceneRenderer->pPSTonemapping)
-        removeShader(pSceneRenderer->pRenderer, &pSceneRenderer->pPSTonemapping);
+    Shader** shaders[] =
+    {
+        &pSceneRenderer->pVSDepthPrePass,
+        &pSceneRenderer->pPSDepthPrePass,
+        &pSceneRenderer->pVSDepthPrePassDoubleSided,
+        &pSceneRenderer->pPSDepthPrePassDoubleSided,
+        &pSceneRenderer->pVSGBuffer,
+        &pSceneRenderer->pPSGBuffer,
+        &pSceneRenderer->pVSGBufferDoubleSided,
+        &pSceneRenderer->pPSGBufferDoubleSided,
+        &pSceneRenderer->pCSGenerateDraws,
+        &pSceneRenderer->pVSLighting,
+        &pSceneRenderer->pPSLighting,
+        &pSceneRenderer->pVSDebug,
+        &pSceneRenderer->pPSDebug,
+        &pSceneRenderer->pVSTonemapping,
+        &pSceneRenderer->pPSTonemapping,
+    };
+
+    for(uint32 i = 0; i < ARR_LEN(shaders); i++)
+    {
+        if(*shaders[i])
+        {
+            removeShader(pSceneRenderer->pRenderer, shaders[i]);
+        }
+    }
 }
 
 void removeSceneDescriptors(SceneRenderer* pSceneRenderer)
@@ -664,10 +670,14 @@ void removeSceneDescriptors(SceneRenderer* pSceneRenderer)
 
 void removeScenePipelines(SceneRenderer* pSceneRenderer)
 {
-    if(pSceneRenderer->pPipeGBufferOpaque)
-        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBufferOpaque);
-    if(pSceneRenderer->pPipeGBufferOpaqueDoubleSided)
-        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBufferOpaqueDoubleSided);
+    if(pSceneRenderer->pPipeDepthPrePass)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeDepthPrePass);
+    if(pSceneRenderer->pPipeDepthPrePassDoubleSided)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeDepthPrePassDoubleSided);
+    if(pSceneRenderer->pPipeGBuffer)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBuffer);
+    if(pSceneRenderer->pPipeGBufferDoubleSided)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBufferDoubleSided);
     if(pSceneRenderer->pPipeGenerateDraws)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
     if(pSceneRenderer->pPipeLighting)
@@ -954,25 +964,75 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBarrier(pCmd, 1, &barrier);
     }
 
+    // Depth pre pass
+
+    {
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
+        RenderTargetBarrier barriers[1];
+        barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        RenderTargetBindDesc bindDesc = {};
+        bindDesc.mColorCount = 0;
+        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDepthPrePass;
+
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        cmdSetViewport(pCmd, pRTDepth);
+        cmdSetScissor(pCmd, pRTDepth);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
+        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
+
+        uint32 constants[1];
+        constants[0] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
+
+        // Opaque
+        cmdDrawIndexedIndirect(pCmd, 
+                pSceneRenderer->pDBDrawCmdsOpaque, 
+                pSceneRenderer->pDBDrawCmdCount, 
+                0,
+                SCENE_MAX_DRAWS);
+
+        pPipeline = pSceneRenderer->pPipeDepthPrePassDoubleSided;
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        // Double sided opaque
+        cmdDrawIndexedIndirect(pCmd, 
+                pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 
+                pSceneRenderer->pDBDrawCmdCount, 
+                sizeof(uint32),
+                SCENE_MAX_DRAWS);
+
+        cmdUnbindRenderTargets(pCmd);
+        gpuTimestamp(str("Depth Pre-pass"), &gpuTimerParams);
+    }
+
     // GBuffer render pass
     {
         RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
         RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-        RenderTarget* pRTDepth = pSceneRenderer->pRTGBufferDepth;
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
 
-        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBufferOpaque;
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBuffer;
 
-        RenderTargetBarrier barriers[3];
+        RenderTargetBarrier barriers[2];
         barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_COLOR_OUTPUT };
         barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_COLOR_OUTPUT };
-        barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        //barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         RenderTargetBindDesc bindDesc = {};
         bindDesc.mColorCount = 2;
         bindDesc.mColorBindings[0] = { pRTGBufferA, LOAD_OP_CLEAR, STORE_OP_STORE };
         bindDesc.mColorBindings[1] = { pRTGBufferB, LOAD_OP_CLEAR, STORE_OP_STORE };
-        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
+        //bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
+        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_LOAD, STORE_OP_STORE };
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdBindGraphicsPipeline(pCmd, pPipeline);
@@ -996,7 +1056,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
                 0,
                 SCENE_MAX_DRAWS);
 
-        pPipeline = pSceneRenderer->pPipeGBufferOpaqueDoubleSided;
+        pPipeline = pSceneRenderer->pPipeGBufferDoubleSided;
         cmdBindGraphicsPipeline(pCmd, pPipeline);
         // Double sided opaque
         cmdDrawIndexedIndirect(pCmd, 
@@ -1013,7 +1073,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     {
         RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
         RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-        RenderTarget* pRTDepth = pSceneRenderer->pRTGBufferDepth;
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
         RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
 
         GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;

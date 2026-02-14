@@ -88,13 +88,24 @@ struct SceneRenderer
     Shader* pCSGenerateDraws = NULL;
     ComputePipeline* pPipeGenerateDraws = NULL;
 
+    // Depth pre-pass
+    RenderTarget* pRTSceneDepth = NULL;
+    Shader* pVSDepthPrePass = NULL;
+    Shader* pPSDepthPrePass = NULL;
+    GraphicsPipeline* pPipeDepthPrePass = NULL;
+    Shader* pVSDepthPrePassDoubleSided = NULL;
+    Shader* pPSDepthPrePassDoubleSided = NULL;
+    GraphicsPipeline* pPipeDepthPrePassDoubleSided = NULL;
+
     // GBuffer draw pass
     RenderTarget* pRTGBufferA = NULL;
     RenderTarget* pRTGBufferB = NULL;
-    RenderTarget* pRTGBufferDepth = NULL;
-    Shader* pVSGBufferOpaque = NULL;
-    Shader* pPSGBufferOpaque = NULL;
-    GraphicsPipeline* pPipeGBufferOpaque = NULL;
+    Shader* pVSGBuffer = NULL;
+    Shader* pPSGBuffer = NULL;
+    GraphicsPipeline* pPipeGBuffer = NULL;
+    Shader* pVSGBufferDoubleSided = NULL;
+    Shader* pPSGBufferDoubleSided = NULL;
+    GraphicsPipeline* pPipeGBufferDoubleSided = NULL;
 
     // Lighting pass
     RenderTarget* pRTAccum = NULL;
@@ -112,10 +123,6 @@ struct SceneRenderer
     Shader* pVSTonemapping = NULL;
     Shader* pPSTonemapping = NULL;
     GraphicsPipeline* pPipeTonemapping = NULL;
-
-    Shader* pVSGBufferOpaqueDoubleSided = NULL;
-    Shader* pPSGBufferOpaqueDoubleSided = NULL;
-    GraphicsPipeline* pPipeGBufferOpaqueDoubleSided = NULL;
 };
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
