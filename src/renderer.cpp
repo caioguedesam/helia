@@ -284,10 +284,54 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTAccum);
     }
 
-    // Geometry pass RT
+    // Scene depth targets
     {
         RenderTargetDesc desc = {};
-        //desc.mFormat = FORMAT_RGBA8_UNORM;
+        desc.mClear = {{0,0,0,0}};
+        uint32 w =   pSceneRenderer->pApp->mWindow.mWidth;
+        uint32 h =  pSceneRenderer->pApp->mWindow.mHeight;
+        desc.mFormat = FORMAT_D32_SFLOAT;
+        desc.mClear.mDepth = 0;
+
+        desc.mWidth = w;
+        desc.mHeight = h;
+        addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneDepth);
+        pSceneRenderer->pDepthHierarchyTextures[0] = pSceneRenderer->pRTSceneDepth->pTexture;
+        pSceneRenderer->mDepthHierarchyCount = 1;
+
+        for(uint32 i = 1; i < HIZ_MAX; i++)
+        {
+            w = MAX(w / 2, 1);
+            h = MAX(h / 2, 1);
+
+            TextureDesc hizDesc = {};
+            hizDesc.mWidth = w;
+            hizDesc.mHeight = h;
+            hizDesc.mDepth = 1;
+            hizDesc.mSamples = 1;
+            hizDesc.mFormat = FORMAT_R32_SFLOAT;
+            hizDesc.mMipCount = 1;
+            hizDesc.mType = TEXTURE_TYPE_2D;
+            hizDesc.mUsage =
+                TEXTURE_USAGE_TRANSFER_SRC |
+                TEXTURE_USAGE_TRANSFER_DST |
+                TEXTURE_USAGE_SAMPLED      |
+                TEXTURE_USAGE_STORAGE;
+
+            addTexture(pSceneRenderer->pRenderer, hizDesc, &pSceneRenderer->pDepthHierarchyTextures[i]);
+
+            pSceneRenderer->mDepthHierarchyCount++;
+
+            if(w == 1 && h == 1)
+            {
+                break;
+            }
+        }
+    }
+
+    // GBuffer pass RT
+    {
+        RenderTargetDesc desc = {};
         desc.mFormat = FORMAT_RGBA8_SRGB;
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
@@ -295,10 +339,6 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferA);
         desc.mFormat = FORMAT_A2RGB10_UNORM;
         addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferB);
-
-        desc.mFormat = FORMAT_D32_SFLOAT;
-        desc.mClear.mDepth = 0;
-        addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneDepth);
     }
 
     // Final present RT
@@ -316,12 +356,18 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         CommandBuffer* pCmd = getCmd(pSceneRenderer->pRenderer, true);
         beginCmd(pCmd);
 
-        RenderTargetBarrier barriers[4];
+        RenderTargetBarrier barriers[3];
         barriers[0] = {pSceneRenderer->pRTGBufferA,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         barriers[1] = {pSceneRenderer->pRTGBufferB,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[2] = {pSceneRenderer->pRTSceneDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[3] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        barriers[2] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        TextureBarrier hizBarriers[HIZ_MAX];
+        for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
+        {
+            hizBarriers[i] = {pSceneRenderer->pDepthHierarchyTextures[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        }
+        cmdTextureBarrier(pCmd, pSceneRenderer->mDepthHierarchyCount, hizBarriers);
 
         endCmd(pCmd);
         submitImmediateCmd(pSceneRenderer->pRenderer, pCmd);
@@ -331,6 +377,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 void addSceneShaders(SceneRenderer* pSceneRenderer)
 {
     String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
+    String hiZDownsampleShaderPath = str("../../res/shaders/hiz_downsample.glsl");
     String depthPrepassShaderPath = str("../../res/shaders/depth_prepass.glsl");
     String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
@@ -363,6 +410,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
         {gbufferShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSGBufferDoubleSided},
 
         {generateDrawsShaderPath, SHADER_TYPE_COMP, NULL, 0, &pSceneRenderer->pCSGenerateDraws},
+        {hiZDownsampleShaderPath, SHADER_TYPE_COMP, NULL, 0, &pSceneRenderer->pCSHiZDownsample},
 
         {lightingShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSLighting},
         {lightingShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSLighting},
@@ -390,8 +438,15 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     // Scene global descriptor set
     if(!pSceneRenderer->pDSGlobal)
     {
+        Texture* storageDepthTextures[HIZ_MAX];
+        for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
+        {
+            storageDepthTextures[i] = pSceneRenderer->pDepthHierarchyTextures[i];
+        }
+
+
         DescriptorSetDesc desc = {};
-        desc.mCount = 14;
+        desc.mCount = 15;
         // TODO(caio): Buffer arrays?
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaque, 1 };
         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 1 };
@@ -407,8 +462,11 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[9] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
         desc.mResources[10] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
         desc.mResources[11] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
-        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
-        desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
+        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
+        desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
+        desc.mResources[14] = { DESCRIPTOR_STORAGE_IMAGE, storageDepthTextures,
+            pSceneRenderer->mDepthHierarchyCount,
+            HIZ_MAX};
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
     }
 
@@ -531,6 +589,21 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDraws);
     }
 
+    if(!pSceneRenderer->pPipeHiZDownsample)
+    {
+        ComputePipelineDesc desc = {};
+
+        desc.pCS = pSceneRenderer->pCSHiZDownsample;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+
+        desc.mConstantBlockCount = 0;
+
+        addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeHiZDownsample);
+    }
+
     if(!pSceneRenderer->pPipeLighting)
     {
         GraphicsPipelineDesc desc = {};
@@ -628,6 +701,10 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTSceneDepth);
+    for(uint32 i = 1; i < pSceneRenderer->mDepthHierarchyCount; i++)
+    {
+        removeTexture(pSceneRenderer->pRenderer, &pSceneRenderer->pDepthHierarchyTextures[i]);
+    }
 }
 
 void removeSceneShaders(SceneRenderer* pSceneRenderer)
@@ -643,6 +720,7 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         &pSceneRenderer->pVSGBufferDoubleSided,
         &pSceneRenderer->pPSGBufferDoubleSided,
         &pSceneRenderer->pCSGenerateDraws,
+        &pSceneRenderer->pCSHiZDownsample,
         &pSceneRenderer->pVSLighting,
         &pSceneRenderer->pPSLighting,
         &pSceneRenderer->pVSDebug,
@@ -680,6 +758,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBufferDoubleSided);
     if(pSceneRenderer->pPipeGenerateDraws)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
+    if(pSceneRenderer->pPipeHiZDownsample)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeHiZDownsample);
     if(pSceneRenderer->pPipeLighting)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeLighting);
     if(pSceneRenderer->pPipeDebug)
@@ -965,7 +1045,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     }
 
     // Depth pre pass
-
     {
         RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
         RenderTargetBarrier barriers[1];
@@ -1011,6 +1090,31 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("Depth Pre-pass"), &gpuTimerParams);
+    }
+
+    // Hierarchical Z Downsampling pass (generates mip chain)
+    {
+        ComputePipeline* pPipeline = pSceneRenderer->pPipeHiZDownsample;
+
+        cmdBindComputePipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        v2u size = { 
+            pSceneRenderer->pRTSceneDepth->mDesc.mWidth, 
+            pSceneRenderer->pRTSceneDepth->mDesc.mHeight, 
+        };
+        uint32 groupSize = 8;
+        cmdDispatch(pCmd, size.x / groupSize, size.y / groupSize, 1);
+
+        gpuTimestamp(str("Hi-Z Downsample Pass"), &gpuTimerParams);
+
+        Barrier barrier = {};
+        barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
+        barrier.mDstStage = PIPELINE_STAGE_COMPUTE_SHADER;
+        barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
+        barrier.mDstAccess = MEMORY_ACCESS_SHADER_READ;
+        cmdBarrier(pCmd, 1, &barrier);
     }
 
     // GBuffer render pass

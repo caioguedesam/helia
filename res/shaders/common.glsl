@@ -145,5 +145,8 @@ DEFINE_SAMPLER(1, 9) samplerPoint;
 
 DEFINE_TEXTURE2D(1, 10) gbufferA;
 DEFINE_TEXTURE2D(1, 11) gbufferB;
-DEFINE_TEXTURE2D(1, 12) depthBuffer;
-DEFINE_TEXTURE2D(1, 13) lightingAccum;
+DEFINE_TEXTURE2D(1, 12) lightingAccum;
+
+#define HIZ_MAX 4
+DEFINE_TEXTURE2D(1, 13)         depthBuffer;
+DEFINE_IMAGE2D(1, 14, r32f)     hiz[HIZ_MAX];

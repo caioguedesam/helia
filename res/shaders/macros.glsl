@@ -23,4 +23,6 @@
 #define DEFINE_TEXTURE2D(SET, BINDING)      layout(set = SET, binding = BINDING) uniform texture2D
 #define DEFINE_SAMPLER(SET, BINDING)        layout(set = SET, binding = BINDING) uniform sampler
 
+#define DEFINE_IMAGE2D(SET, BINDING, FORMAT)      layout(FORMAT, set = SET, binding = BINDING) uniform image2D
+
 #define DEFINE_CONSTANT_BLOCK layout(push_constant) uniform CONCAT(PUSH_CONSTANT_BLOCK_, __LINE__)

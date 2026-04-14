@@ -36,6 +36,7 @@ struct PerDrawData
 };
 
 #define MAX_DEBUG_VERTS 1000000
+#define HIZ_MAX 4
 struct SceneRenderer
 {
     // References
@@ -88,8 +89,15 @@ struct SceneRenderer
     Shader* pCSGenerateDraws = NULL;
     ComputePipeline* pPipeGenerateDraws = NULL;
 
+    // Hi-Z mip generation pass
+    Shader* pCSHiZDownsample = NULL;
+    ComputePipeline* pPipeHiZDownsample = NULL;
+
     // Depth pre-pass
     RenderTarget* pRTSceneDepth = NULL;
+    //RenderTarget* pRTSceneDepth[HIZ_MAX];
+    Texture* pDepthHierarchyTextures[HIZ_MAX];
+    uint32 mDepthHierarchyCount = 0;
     Shader* pVSDepthPrePass = NULL;
     Shader* pPSDepthPrePass = NULL;
     GraphicsPipeline* pPipeDepthPrePass = NULL;
