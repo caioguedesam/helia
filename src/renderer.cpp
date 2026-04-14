@@ -322,7 +322,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
             pSceneRenderer->mDepthHierarchyCount++;
 
-            if(w == 1 && h == 1)
+            if(w == 1 || h == 1)
             {
                 break;
             }
@@ -599,7 +599,12 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
         desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
 
-        desc.mConstantBlockCount = 0;
+        // Constants:
+        // - Base mip (uint32)
+        // - Mips to generate (uint32)
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_COMP;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeHiZDownsample);
     }
@@ -1104,8 +1109,39 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
             pSceneRenderer->pRTSceneDepth->mDesc.mWidth, 
             pSceneRenderer->pRTSceneDepth->mDesc.mHeight, 
         };
-        uint32 groupSize = 8;
-        cmdDispatch(pCmd, size.x / groupSize, size.y / groupSize, 1);
+
+        uint32 constants[2];
+        uint32 baseMip = 0;
+        while(baseMip < HIZ_MAX)
+        {
+            uint32 mipCount = 3; 
+            v2u mipSize = size;
+            for(int32 i = 1; i <= 3; i++)
+            {
+                mipSize = { mipSize.x / 2, mipSize.y / 2 };
+                if (mipSize.x == 0 || mipSize.y == 0)
+                    mipCount--;
+            }
+
+            constants[0] = baseMip;
+            constants[1] = mipCount;
+            cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants);
+
+            uint32 groupSize = (uint32)pow(2, mipCount);
+            v2u dispatchSize = { 
+                size.x % groupSize == 0 ? size.x : size.x + (groupSize - (size.x % groupSize)),
+                size.y % groupSize == 0 ? size.y : size.y + (groupSize - (size.y % groupSize)),
+            };
+            cmdDispatch(pCmd, dispatchSize.x, dispatchSize.y, 1);
+
+            if(mipCount != 3)
+            {
+                break;
+            }
+
+            baseMip += mipCount;
+            size = { size.x / groupSize, size.y / groupSize };
+        }
 
         gpuTimestamp(str("Hi-Z Downsample Pass"), &gpuTimerParams);
 

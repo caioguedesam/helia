@@ -36,7 +36,7 @@ struct PerDrawData
 };
 
 #define MAX_DEBUG_VERTS 1000000
-#define HIZ_MAX 4
+#define HIZ_MAX 10
 struct SceneRenderer
 {
     // References
