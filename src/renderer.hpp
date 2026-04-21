@@ -15,18 +15,19 @@ struct DirectionalLight
     v3f mColor = {1,1,1};
 };
 
+#define MAX_CASCADES 3
 struct PerFrameUniforms
 {
     m4f mView = {};
     m4f mProj = {};
 
+    m4f mShadowCascadesViewProj[MAX_CASCADES];
+
     v4f mCamWorldPos = {0,0,0,1};
     v4f mDirLight1 = {0,0,0,1};          // xyz = Direction, w = Intensity
     v4f mDirLight2 = {1,1,1,0.05f};      // rgb = Color, a = Ambient factor
 
-    v4f mCameraFrustumPlanes[6];
-
-    v4f mPadding0[3];
+    v4f mPadding0[1];
 };
 
 struct PerDrawData
@@ -37,6 +38,7 @@ struct PerDrawData
 
 #define MAX_DEBUG_VERTS 1000000
 #define HIZ_MAX 10
+#define SHADOW_MAP_SIZE 1024
 struct SceneRenderer
 {
     // References
@@ -88,10 +90,15 @@ struct SceneRenderer
     // Draw call buffer pass
     Shader* pCSGenerateDraws = NULL;
     ComputePipeline* pPipeGenerateDraws = NULL;
+    Shader* pCSGenerateDrawsShadowMap = NULL;
+    ComputePipeline* pPipeGenerateDrawsShadowMap = NULL;
 
     // Hi-Z mip generation pass
     Shader* pCSHiZDownsample = NULL;
     ComputePipeline* pPipeHiZDownsample = NULL;
+
+    // Shadow map pass
+    RenderTarget* pRTShadowMaps[MAX_CASCADES];
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth = NULL;

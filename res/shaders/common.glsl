@@ -34,10 +34,14 @@ struct SceneMaterial
     STRUCT_PADDING_UINT(0, 1);
 };
 
+#define MAX_CASCADES 3
 struct PerFrameUniforms
 {
     mat4 mView;
     mat4 mProj;
+
+    mat4 mShadowCascadesViewProj[MAX_CASCADES];
+
     // TODO(caio): Pass precalculated matrices
     // (inverses, tranpose inverse for normals, composites, etc.)
 
@@ -45,9 +49,11 @@ struct PerFrameUniforms
     vec4 mLight1;
     vec4 mLight2;
 
-    vec4 mCameraFrustumPlanes[6];
+    //vec4 mCameraFrustumPlanes[6];
 
-    STRUCT_PADDING_VEC4(0, 3);
+    //vec4 mShadowFrustumPlanes[MAX_CASCADES * 6];
+
+    STRUCT_PADDING_VEC4(0, 1);  // Alignment 64 bytes (mat4)
 };
 
 struct PerDrawData
@@ -150,3 +156,5 @@ DEFINE_TEXTURE2D(1, 12) lightingAccum;
 #define HIZ_MAX 10
 DEFINE_TEXTURE2D(1, 13)         depthBuffer;
 DEFINE_IMAGE2D(1, 14, r32f)     hiz[HIZ_MAX];
+
+DEFINE_TEXTURE2D(1, 15) shadowMaps[MAX_CASCADES];

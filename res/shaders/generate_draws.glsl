@@ -9,14 +9,73 @@ DEFINE_CONSTANT_BLOCK
     uint frameId;
 };
 
-// Frustum culling
-bool frustumTest(SceneNode node, PerFrameUniforms perFrame)
+void frustumPlanesFromViewProj(mat4 vp, out vec4 planes[6])
 {
+    // Plane: dot(n, p) + d >= 0
+    planes[0] = vp[3] + vp[0]; // Left
+    planes[1] = vp[3] - vp[0]; // Right
+    planes[2] = vp[3] + vp[1]; // Bottom
+    planes[3] = vp[3] - vp[1]; // Top
+
+    // Z planes (Vulkan depth: 0..w)
+    // Reverse-Z flips near/far meaning
+
+    // Near plane (z >= 0)
+    planes[4] = vp[2];
+
+    // Far plane (z <= w)
+    planes[5] = vp[3] - vp[2];
+
+    // Normalize
+    for (int i = 0; i < 6; i++)
+    {
+        float len = length(planes[i].xyz);
+        planes[i] /= len;
+    }
+}
+
+// Frustum culling
+bool cameraFrustumTest(SceneNode node, PerFrameUniforms perFrame)
+{
+    // AABB is in frustum if, for each plane, the point furthest along the plane's normal
+    // is inside it's half-space.
+    vec4 planes[6];
+    frustumPlanesFromViewProj(perFrame.mProj * perFrame.mView, planes);
+
+    for(int i = 0; i < 6; i++)
+    {
+        //vec4 plane = perFrame.mCameraFrustumPlanes[i];
+        vec4 plane = planes[i];
+        vec3 p;
+
+        p.x = plane.x < 0 ? node.mMinAABB.x : node.mMaxAABB.x;
+        p.y = plane.y < 0 ? node.mMinAABB.y : node.mMaxAABB.y;
+        p.z = plane.z < 0 ? node.mMinAABB.z : node.mMaxAABB.z;
+
+        float sdf = dot(plane.xyz, p) + plane.w;
+        if(sdf < 0)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool shadowCascadeFrustumTest(SceneNode node, PerFrameUniforms perFrame, int cascade)
+{
+    if(cascade >= MAX_CASCADES)
+    {
+        return true;
+    }
+
+    vec4 planes[6];
+    frustumPlanesFromViewProj(perFrame.mShadowCascadesViewProj[cascade], planes);
+
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
     for(int i = 0; i < 6; i++)
     {
-        vec4 plane = perFrame.mCameraFrustumPlanes[i];
+        vec4 plane = planes[i];
         vec3 p;
 
         p.x = plane.x < 0 ? node.mMinAABB.x : node.mMaxAABB.x;
@@ -116,15 +175,14 @@ void main()
     SceneMaterial mat = sceneMaterials[node.mMaterialId];
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
 
+#if SHADOW_MAP
+#else
     // Frustum culling
-#if !DISABLE_FRUSTUM_CULLING
-    if(!frustumTest(node, perFrame))
+    if(!cameraFrustumTest(node, perFrame))
     {
         return;
     }
-#endif
 
-#if !DISABLE_OCCLUSION_CULLING
     // Occlusion culling with Hi-Z
     if(!occlusionTest(node, perFrame))
     {

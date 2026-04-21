@@ -329,6 +329,23 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         }
     }
 
+    // Shadow map cascades
+    {
+        RenderTargetDesc desc = {};
+        desc.mClear = {{0,0,0,0}};
+        uint32 w = SHADOW_MAP_SIZE;
+        uint32 h = SHADOW_MAP_SIZE;
+        desc.mFormat = FORMAT_D32_SFLOAT;
+        desc.mClear.mDepth = 0;
+
+        desc.mWidth = w;
+        desc.mHeight = h;
+        for(int32 i = 0; i < MAX_CASCADES; i++)
+        {
+            addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadowMaps[i]);
+        }
+    }
+
     // GBuffer pass RT
     {
         RenderTargetDesc desc = {};
@@ -362,6 +379,13 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         barriers[2] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
+        RenderTargetBarrier smBarriers[MAX_CASCADES];
+        for(int i = 0; i < MAX_CASCADES; i++)
+        {
+            smBarriers[i] = {pSceneRenderer->pRTShadowMaps[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+        }
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(smBarriers), smBarriers);
+
         TextureBarrier hizBarriers[HIZ_MAX];
         for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
         {
@@ -383,6 +407,10 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
     String debugShaderPath = str("../../res/shaders/debug.glsl");
     String tonemappingShaderPath = str("../../res/shaders/tone_mapping.glsl");
+    String shadowMapDefines[] =
+    {
+        str("SHADOW_MAP"),
+    };
     String doubleSidedDefines[] =
     {
         str("DOUBLE_SIDED"),
@@ -410,6 +438,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
         {gbufferShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSGBufferDoubleSided},
 
         {generateDrawsShaderPath, SHADER_TYPE_COMP, NULL, 0, &pSceneRenderer->pCSGenerateDraws},
+        {generateDrawsShaderPath, SHADER_TYPE_COMP, shadowMapDefines, ARR_LEN(shadowMapDefines), &pSceneRenderer->pCSGenerateDrawsShadowMap},
         {hiZDownsampleShaderPath, SHADER_TYPE_COMP, NULL, 0, &pSceneRenderer->pCSHiZDownsample},
 
         {lightingShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSLighting},
@@ -444,9 +473,14 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
             storageDepthTextures[i] = pSceneRenderer->pDepthHierarchyTextures[i];
         }
 
+        Texture* shadowMapTextures[MAX_CASCADES];
+        for(int32 i = 0; i < MAX_CASCADES; i++)
+        {
+            shadowMapTextures[i] = pSceneRenderer->pRTShadowMaps[i]->pTexture;
+        }
 
         DescriptorSetDesc desc = {};
-        desc.mCount = 15;
+        desc.mCount = 16;
         // TODO(caio): Buffer arrays?
         desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaque, 1 };
         desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 1 };
@@ -467,6 +501,8 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         desc.mResources[14] = { DESCRIPTOR_STORAGE_IMAGE, storageDepthTextures,
             pSceneRenderer->mDepthHierarchyCount,
             HIZ_MAX};
+        desc.mResources[15] = { DESCRIPTOR_TEXTURE, shadowMapTextures,
+            MAX_CASCADES, MAX_CASCADES};
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
     }
 
@@ -587,6 +623,12 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDraws);
+
+        if(!pSceneRenderer->pPipeGenerateDrawsShadowMap)
+        {
+            desc.pCS = pSceneRenderer->pCSGenerateDrawsShadowMap;
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDrawsShadowMap);
+        }
     }
 
     if(!pSceneRenderer->pPipeHiZDownsample)
@@ -706,7 +748,11 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTSceneDepth);
-    for(uint32 i = 1; i < pSceneRenderer->mDepthHierarchyCount; i++)
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadowMaps[i]);
+    }
+    for(int32 i = 1; i < pSceneRenderer->mDepthHierarchyCount; i++)
     {
         removeTexture(pSceneRenderer->pRenderer, &pSceneRenderer->pDepthHierarchyTextures[i]);
     }
@@ -725,6 +771,7 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         &pSceneRenderer->pVSGBufferDoubleSided,
         &pSceneRenderer->pPSGBufferDoubleSided,
         &pSceneRenderer->pCSGenerateDraws,
+        &pSceneRenderer->pCSGenerateDrawsShadowMap,
         &pSceneRenderer->pCSHiZDownsample,
         &pSceneRenderer->pVSLighting,
         &pSceneRenderer->pPSLighting,
@@ -763,6 +810,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGBufferDoubleSided);
     if(pSceneRenderer->pPipeGenerateDraws)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDraws);
+    if(pSceneRenderer->pPipeGenerateDrawsShadowMap)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeGenerateDrawsShadowMap);
     if(pSceneRenderer->pPipeHiZDownsample)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeHiZDownsample);
     if(pSceneRenderer->pPipeLighting)
@@ -781,13 +830,6 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
     pSceneRenderer->perFrameUniforms[activeFrame].mView = cameraView;
     pSceneRenderer->perFrameUniforms[activeFrame].mProj = cameraProj;
     pSceneRenderer->perFrameUniforms[activeFrame].mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
-    Frustum cameraFrustum = getFrustum(&pSceneRenderer->mCamera);
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[0] = cameraFrustum.planes[0];
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[1] = cameraFrustum.planes[1];
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[2] = cameraFrustum.planes[2];
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[3] = cameraFrustum.planes[3];
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[4] = cameraFrustum.planes[4];
-    pSceneRenderer->perFrameUniforms[activeFrame].mCameraFrustumPlanes[5] = cameraFrustum.planes[5];
 
     DirectionalLight light = pSceneRenderer->mDirLight;
     pSceneRenderer->perFrameUniforms[activeFrame].mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
