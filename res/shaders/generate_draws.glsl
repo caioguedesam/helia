@@ -10,7 +10,7 @@ DEFINE_CONSTANT_BLOCK
 };
 
 // Frustum culling
-bool inFrustum(SceneNode node, PerFrameUniforms perFrame)
+bool frustumTest(SceneNode node, PerFrameUniforms perFrame)
 {
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
@@ -32,6 +32,74 @@ bool inFrustum(SceneNode node, PerFrameUniforms perFrame)
     return true;
 }
 
+bool isPointInNDC(vec3 p)
+{
+    return !(p.x < -1.0 || p.x > 1.0 || p.y < -1.0 || p.y > 1.0 || p.z < 0.0 || p.z > 1.0);
+}
+
+bool occlusionTest(SceneNode node, PerFrameUniforms perFrame)
+{
+    // Project 8 aabb corners to Z buffer UV space
+    vec4 p[8];
+    p[0] = vec4(node.mMinAABB.x, node.mMinAABB.y, node.mMinAABB.z, 1);
+    p[1] = vec4(node.mMaxAABB.x, node.mMinAABB.y, node.mMinAABB.z, 1);
+    p[2] = vec4(node.mMinAABB.x, node.mMaxAABB.y, node.mMinAABB.z, 1);
+    p[3] = vec4(node.mMaxAABB.x, node.mMaxAABB.y, node.mMinAABB.z, 1);
+    p[4] = vec4(node.mMinAABB.x, node.mMinAABB.y, node.mMaxAABB.z, 1);
+    p[5] = vec4(node.mMaxAABB.x, node.mMinAABB.y, node.mMaxAABB.z, 1);
+    p[6] = vec4(node.mMinAABB.x, node.mMaxAABB.y, node.mMaxAABB.z, 1);
+    p[7] = vec4(node.mMaxAABB.x, node.mMaxAABB.y, node.mMaxAABB.z, 1);
+    vec2 xyMin = vec2(FLT_MAX, FLT_MAX);
+    vec2 xyMax = vec2(-FLT_MAX, -FLT_MAX);
+    // Track closest point of the AABB corners to the camera (reverse Z = max)
+    float zMax = 0.f;
+
+    for(int i = 0; i < 8; i++)
+    {
+        // Convert to clip space
+        p[i] = perFrame.mProj * perFrame.mView * p[i];
+        p[i] = p[i] / p[i].w;
+
+        // Early out: if any AABB corner is out of bounds, don't test.
+        if(!isPointInNDC(p[i].xyz))
+        {
+            return true;
+        }
+
+        // Convert to UV space
+        p[i] = vec4((p[i].x + 1.0) / 2.0, (p[i].y + 1.0) / 2.0, p[i].z, 1.0);
+
+        xyMin = min(xyMin, p[i].xy);
+        xyMax = max(xyMax, p[i].xy);
+        zMax = max(zMax, p[i].z);
+    }
+
+    // Get the width/height of AABB in texels of first Hi-Z buffer.
+    ivec2 baseSize = imageSize(hiz[0]);
+    vec2 aabbWidth = xyMax - xyMin;
+    vec2 texelSize = aabbWidth * vec2(baseSize);
+
+    // Get the mip where AABB covers 4 texels (one for each corner)
+    // TODO(caio): Still get some objects being occluded when they shouldn't here.
+    // Is the mip selected not the 2x2 footprint for the AABB?
+    int mip = int(min(floor(log2(max(texelSize.x, texelSize.y))) + 1.0, HIZ_MAX - 1.0));
+    vec2 mipSize = vec2(imageSize(hiz[mip]));
+
+    vec4 box = vec4(xyMin, xyMax);
+
+    float z0 = imageLoad(hiz[mip], ivec2(mipSize * box.xy)).r;
+    float z1 = imageLoad(hiz[mip], ivec2(mipSize * box.zw)).r;
+    float z2 = imageLoad(hiz[mip], ivec2(mipSize * box.xw)).r;
+    float z3 = imageLoad(hiz[mip], ivec2(mipSize * box.zy)).r;
+
+    // Get furthest occluder stored in hiz mip (reverse Z = min)
+    float hizMin = min(z0, min(z1, min(z2, z3)));
+
+    // AABB is fully occluded if closest point is behind furthest occluder (reverse Z = aabb z < occluder z).
+    float bias = 1e-7f;
+    return zMax >= (hizMin - bias);
+}
+
 void main()
 {
     uint idx = gl_GlobalInvocationID.x;
@@ -40,16 +108,29 @@ void main()
         return;
     }
 
+    // Debug
+    //if(idx != 2) return;
+
     SceneNode node = sceneNodes[idx];
     SceneMesh mesh = sceneMeshes[node.mMeshId];
     SceneMaterial mat = sceneMaterials[node.mMaterialId];
     PerFrameUniforms perFrame = perFrameUniforms[frameId];
 
     // Frustum culling
-    if(!inFrustum(node, perFrame))
+#if !DISABLE_FRUSTUM_CULLING
+    if(!frustumTest(node, perFrame))
     {
         return;
     }
+#endif
+
+#if !DISABLE_OCCLUSION_CULLING
+    // Occlusion culling with Hi-Z
+    if(!occlusionTest(node, perFrame))
+    {
+        return;
+    }
+#endif
 
     if(mat.mDoubleSided == 1)
     {

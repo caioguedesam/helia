@@ -22,7 +22,9 @@ ivec2 GenerateMip(int i, ivec2 gID, ivec2 sampleCoord)
     float z2 = samples[sampleCoord.x][sampleCoord.y + 1][prevSample];
     float z3 = samples[sampleCoord.x + 1][sampleCoord.y + 1][prevSample];
     
-    float z = max(z0, max(z1, max(z2, z3)));
+    // Store the furthest depth in the mip chain (reverse Z = min)
+    // which is the most conservative occluder
+    float z = min(z0, min(z1, min(z2, z3)));
 
     sampleCoord = sampleCoord / 2;
 

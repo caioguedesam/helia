@@ -2,6 +2,7 @@
 #define EPSILON 0.000001
 #define dot_c(A, B) max(dot((A), (B)), 0.0)
 #define saturate(X) clamp(X, 0.0, 1.0)
+#define FLT_MAX 3.402823466e+38F
 
 #define CONCAT_(A, B) A##B
 #define CONCAT(A, B) CONCAT_(A, B)

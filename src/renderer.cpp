@@ -1022,33 +1022,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     uploadPerFrameUniforms(pSceneRenderer);
     gpuTimestamp(str("Upload PerFrame"), &gpuTimerParams);
 
-    // Generate draws compute pass
-    {
-        ComputePipeline* pPipeline = pSceneRenderer->pPipeGenerateDraws;
-
-        cmdBindComputePipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
-
-        uint32 constants[2];
-        constants[0] = pSceneRenderer->pScene->mNodeCount;
-        constants[1] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants[0]);
-
-        cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
-        cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
-        cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
-
-        gpuTimestamp(str("Generate Draws Pass"), &gpuTimerParams);
-
-        Barrier barrier = {};
-        barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
-        barrier.mDstStage = PIPELINE_STAGE_DRAW_INDIRECT;
-        barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
-        barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
-        cmdBarrier(pCmd, 1, &barrier);
-    }
-
     // Depth pre pass
     {
         RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
@@ -1097,7 +1070,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         gpuTimestamp(str("Depth Pre-pass"), &gpuTimerParams);
     }
 
-    // Hierarchical Z Downsampling pass (generates mip chain)
+    // Hierarchical Z Downsampling pass
     {
         ComputePipeline* pPipeline = pSceneRenderer->pPipeHiZDownsample;
 
@@ -1150,6 +1123,40 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         barrier.mDstStage = PIPELINE_STAGE_COMPUTE_SHADER;
         barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
         barrier.mDstAccess = MEMORY_ACCESS_SHADER_READ;
+        cmdBarrier(pCmd, 1, &barrier);
+    }
+
+    // Generate draws pass
+    {
+        Barrier barrier = {};
+        barrier.mSrcStage = PIPELINE_STAGE_DRAW_INDIRECT;
+        barrier.mDstStage = PIPELINE_STAGE_TRANSFER;
+        barrier.mSrcAccess = MEMORY_ACCESS_INDIRECT_READ;
+        barrier.mDstAccess = MEMORY_ACCESS_TRANSFER_WRITE;
+        cmdBarrier(pCmd, 1, &barrier);
+
+        ComputePipeline* pPipeline = pSceneRenderer->pPipeGenerateDraws;
+
+        cmdBindComputePipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+
+        uint32 constants[2];
+        constants[0] = pSceneRenderer->pScene->mNodeCount;
+        constants[1] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants[0]);
+
+        cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
+        cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
+        cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
+
+        gpuTimestamp(str("Generate Draws Pass"), &gpuTimerParams);
+
+        barrier = {};
+        barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
+        barrier.mDstStage = PIPELINE_STAGE_DRAW_INDIRECT;
+        barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
+        barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
         cmdBarrier(pCmd, 1, &barrier);
     }
 
@@ -1336,6 +1343,15 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
                 -400, 0, 400, 0);
         uiEndFrame(pCmd, bindDesc);
         gpuTimestamp(str("UI pass"), &gpuTimerParams);
+    }
+
+    // Transitioning depth buffer back to general, in case descriptors reload
+    {
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
+        RenderTargetBarrier barriers[1];
+        barriers[0] = { pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_GENERAL };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
     }
 
     // Copy to swap chain
