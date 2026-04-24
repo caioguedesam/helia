@@ -39,6 +39,8 @@ struct PerFrameUniforms
 {
     mat4 mView;
     mat4 mProj;
+    mat4 mMainView;
+    mat4 mMainProj;
 
     mat4 mShadowCascadesViewProj[MAX_CASCADES];
 

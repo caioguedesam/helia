@@ -129,6 +129,11 @@ void update()
         addLoadRequest(&gApp, LOAD_REQUEST_SHADER);
     }
 
+    if(isJustDown(&gApp.mKeys, KEY_F))
+    {
+        freezeMainCamera(&gSceneRenderer, !gSceneRenderer.mFreezeMainCam);
+    }
+
     if(isJustDown(&gApp.mKeys, KEY_ESCAPE))
     {
         gApp.mRunning = false;

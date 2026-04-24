@@ -830,6 +830,11 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
     pSceneRenderer->perFrameUniforms[activeFrame].mView = cameraView;
     pSceneRenderer->perFrameUniforms[activeFrame].mProj = cameraProj;
     pSceneRenderer->perFrameUniforms[activeFrame].mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
+    if(!pSceneRenderer->mFreezeMainCam)
+    {
+        pSceneRenderer->perFrameUniforms[activeFrame].mMainView = cameraView;
+        pSceneRenderer->perFrameUniforms[activeFrame].mMainProj = cameraProj;
+    }
 
     DirectionalLight light = pSceneRenderer->mDirLight;
     pSceneRenderer->perFrameUniforms[activeFrame].mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
@@ -901,7 +906,7 @@ void debugAddSphere(SceneRenderer* pSceneRenderer, v3f center, float radius, v3f
 
 void debugAddPoint(SceneRenderer* pSceneRenderer, v3f p, v3f col)
 {
-    debugAddSphere(pSceneRenderer, p, 0.05f, col, 4, 4);
+    debugAddSphere(pSceneRenderer, p, 0.0001f, col, 4, 4);
 }
 
 void debugAddCylinder(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radius, v3f color, uint32 divs)
@@ -1024,9 +1029,61 @@ void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color
     debugAddTri(pSceneRenderer, points[1], points[7], points[3], color);
 }
 
+void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color)
+{
+    v3f corners[8];
+    frustumCorners(view, proj, corners, 0.00001f);
+
+    // Near plane
+    //debugAddTri(pSceneRenderer, corners[0], corners[2], corners[1], color);
+    //debugAddTri(pSceneRenderer, corners[2], corners[3], corners[1], color);
+
+    // Far plane
+    //debugAddTri(pSceneRenderer, corners[4], corners[6], corners[5], color);
+    //debugAddTri(pSceneRenderer, corners[6], corners[7], corners[5], color);
+
+    // Top plane
+    debugAddTri(pSceneRenderer, corners[0], corners[5], corners[4], color);
+    debugAddTri(pSceneRenderer, corners[0], corners[1], corners[5], color);
+    
+    // Bottom plane
+    debugAddTri(pSceneRenderer, corners[2], corners[7], corners[6], color);
+    debugAddTri(pSceneRenderer, corners[2], corners[3], corners[7], color);
+
+    // Left plane
+    debugAddTri(pSceneRenderer, corners[0], corners[2], corners[4], color);
+    debugAddTri(pSceneRenderer, corners[2], corners[6], corners[4], color);
+
+    // Right plane
+    debugAddTri(pSceneRenderer, corners[1], corners[3], corners[5], color);
+    debugAddTri(pSceneRenderer, corners[3], corners[7], corners[5], color);
+}
+
 void debugGeometry(SceneRenderer* pSceneRenderer)
 {
     pSceneRenderer->mDebugVerts.clear();
+
+    if(pSceneRenderer->mFreezeMainCam)
+    {
+        uint32 frame = pSceneRenderer->pRenderer->mActiveFrame;
+        PerFrameUniforms& frameUniforms = pSceneRenderer->perFrameUniforms[frame];
+
+        Scene* pScene = pSceneRenderer->pScene;
+        Frustum camFrustum = frustum(matMul(frameUniforms.mMainProj, frameUniforms.mMainView));
+
+        debugAddFrustum(pSceneRenderer, frameUniforms.mMainView, frameUniforms.mMainProj, {1,0,1});
+
+        // AABB + frustum culling debug
+        // for(int32 i = 0; i < pScene->mNodeCount; i++)
+        // {
+        //     SceneNode* pNode = &pScene->mNodes[i];
+        //     AABB nodeAABB = { to3f(pNode->mMinAABB), to3f(pNode->mMaxAABB) };
+        //     if(inFrustum(nodeAABB, camFrustum))
+        //     {
+        //         debugAddAABB(pSceneRenderer, nodeAABB, identity(), {1,1,1});
+        //     }
+        // }
+    }
 
     // Add debug geometry here
 
@@ -1041,6 +1098,11 @@ void debugGeometry(SceneRenderer* pSceneRenderer)
             0, 
             pSceneRenderer->mDebugVerts.mData, 
             pSceneRenderer->mDebugVerts.mCount * sizeof(float));
+}
+
+void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze)
+{
+    pSceneRenderer->mFreezeMainCam = freeze;
 }
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
@@ -1113,6 +1175,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     }
 
     // Hierarchical Z Downsampling pass
+    if(!pSceneRenderer->mFreezeMainCam)
     {
         ComputePipeline* pPipeline = pSceneRenderer->pPipeHiZDownsample;
 

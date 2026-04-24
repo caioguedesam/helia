@@ -20,6 +20,8 @@ struct PerFrameUniforms
 {
     m4f mView = {};
     m4f mProj = {};
+    m4f mMainView = {};
+    m4f mMainProj = {};
 
     m4f mShadowCascadesViewProj[MAX_CASCADES];
 
@@ -132,6 +134,7 @@ struct SceneRenderer
     Shader* pVSDebug = NULL;
     Shader* pPSDebug = NULL;
     GraphicsPipeline* pPipeDebug = NULL;
+    bool mFreezeMainCam = false;
 
     // Final present pass
     RenderTarget* pRTPresent = NULL;
@@ -170,6 +173,8 @@ void debugAddCone(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radiu
 void debugAddVector(SceneRenderer* pSceneRenderer, v3f start, v3f dir, v3f color);
 void debugAddPlane(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f p3, v3f color1, v3f color2);
 void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color);
+void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color);
 void debugGeometry(SceneRenderer* pSceneRenderer);
+void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze);
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame);

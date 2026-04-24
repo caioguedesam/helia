@@ -11,20 +11,23 @@ DEFINE_CONSTANT_BLOCK
 
 void frustumPlanesFromViewProj(mat4 vp, out vec4 planes[6])
 {
+    // https://www.gamedevs.org/uploads/fast-extraction-viewing-frustum-planes-from-world-view-projection-matrix.pdf
+    // Note: matrix is transposed here to account for column-major multiplication ordering
+    // (Mv instead of vM).
+
+    // Extract rows from column-major matrix
+    vec4 r0 = vec4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
+    vec4 r1 = vec4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
+    vec4 r2 = vec4(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
+    vec4 r3 = vec4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+
     // Plane: dot(n, p) + d >= 0
-    planes[0] = vp[3] + vp[0]; // Left
-    planes[1] = vp[3] - vp[0]; // Right
-    planes[2] = vp[3] + vp[1]; // Bottom
-    planes[3] = vp[3] - vp[1]; // Top
-
-    // Z planes (Vulkan depth: 0..w)
-    // Reverse-Z flips near/far meaning
-
-    // Near plane (z >= 0)
-    planes[4] = vp[2];
-
-    // Far plane (z <= w)
-    planes[5] = vp[3] - vp[2];
+    planes[0] = r3 + r0; // Left
+    planes[1] = r3 - r0; // Right
+    planes[2] = r3 + r1; // Bottom
+    planes[3] = r3 - r1; // Top
+    planes[4] = r3 - r2; // Near
+    planes[5] = r2;      // Far
 
     // Normalize
     for (int i = 0; i < 6; i++)
@@ -40,7 +43,7 @@ bool cameraFrustumTest(SceneNode node, PerFrameUniforms perFrame)
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
     vec4 planes[6];
-    frustumPlanesFromViewProj(perFrame.mProj * perFrame.mView, planes);
+    frustumPlanesFromViewProj(perFrame.mMainProj * perFrame.mMainView, planes);
 
     for(int i = 0; i < 6; i++)
     {
@@ -116,7 +119,7 @@ bool occlusionTest(SceneNode node, PerFrameUniforms perFrame)
     for(int i = 0; i < 8; i++)
     {
         // Convert to clip space
-        p[i] = perFrame.mProj * perFrame.mView * p[i];
+        p[i] = perFrame.mMainProj * perFrame.mMainView * p[i];
         p[i] = p[i] / p[i].w;
 
         // Early out: if any AABB corner is out of bounds, don't test.
