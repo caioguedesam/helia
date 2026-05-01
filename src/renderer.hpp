@@ -16,6 +16,11 @@ struct DirectionalLight
 };
 
 #define MAX_CASCADES 3
+struct ShadowSettings
+{
+    float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
+};
+
 struct PerFrameUniforms
 {
     m4f mView = {};
@@ -53,6 +58,7 @@ struct SceneRenderer
     PerFrameUniforms perFrameUniforms[CONCURRENT_FRAMES];
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
+    ShadowSettings mShadowSettings = {};
     float mAmbient = 0.f;
     GpuTimer mGpuTimer = {};
     Array<float> mDebugVerts;
@@ -173,8 +179,10 @@ void debugAddCone(SceneRenderer* pSceneRenderer, v3f start, v3f dir, float radiu
 void debugAddVector(SceneRenderer* pSceneRenderer, v3f start, v3f dir, v3f color);
 void debugAddPlane(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f p3, v3f color1, v3f color2);
 void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color);
-void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color);
+void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color, float zOffset = 0.00001f);
 void debugGeometry(SceneRenderer* pSceneRenderer);
 void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze);
+
+void addUIControls(SceneRenderer* pSceneRenderer);
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame);

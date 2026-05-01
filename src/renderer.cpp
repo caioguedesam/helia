@@ -5,6 +5,7 @@
 #include "../dw/src/render/ui.hpp"
 #include "../dw/src/render/texture.hpp"
 #include "../dw/src/core/base.hpp"
+#include "dw/src/core/app.hpp"
 #include "dw/src/math/math.hpp"
 #include "dw/src/math/volumes.hpp"
 #include "dw/src/render/buffer.hpp"
@@ -1029,10 +1030,10 @@ void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color
     debugAddTri(pSceneRenderer, points[1], points[7], points[3], color);
 }
 
-void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color)
+void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color, float zOffset)
 {
     v3f corners[8];
-    frustumCorners(view, proj, corners, 0.00001f);
+    frustumCorners(view, proj, corners, zOffset);
 
     // Near plane
     //debugAddTri(pSceneRenderer, corners[0], corners[2], corners[1], color);
@@ -1059,19 +1060,102 @@ void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f colo
     debugAddTri(pSceneRenderer, corners[3], corners[7], corners[5], color);
 }
 
+void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances)
+{
+    // https://developer.nvidia.com/gpugems/gpugems3/part-ii-light-and-shadows/chapter-10-parallel-split-shadow-maps-programmable-gpus
+
+    float zNear = pCam->mDesc.mNear;
+    float zFar = pCam->mDesc.mFar;
+
+    float lambda = pSceneRenderer->mShadowSettings.kSplitFactor;
+
+    // Distances are stored as far plane for respective cascade.
+    // Near for cascade n is far for cascade n-1.
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        float cLog = zNear * powf((zFar / zNear), (float)(i + 1) / MAX_CASCADES);
+        float cLin = zNear + ((zFar - zNear) * (float)(i + 1) / MAX_CASCADES);
+        pDistances[i] = lambda * cLog + (1.f - lambda) * cLin;
+    }
+}
+
+// TODO(caio): Move this somewhere else and to header when actually drawing shadow maps
+void debugAddCascadeFrustums(SceneRenderer* pSceneRenderer, Camera* pMainCam)
+{
+    float zDistances[MAX_CASCADES];
+
+    v3f cascadeColors[MAX_CASCADES] =
+    {
+        {1,0,0},
+        {0,1,0},
+        {0,0,1},
+    };
+
+    getCascadeDistances(pSceneRenderer, pMainCam, zDistances);
+
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        Camera cascadeCam;
+        CameraDesc desc = pMainCam->mDesc;
+        if(i != 0)
+        {
+            desc.mNear = zDistances[i - 1];
+        }
+        desc.mFar = zDistances[i];
+        initCamera(pMainCam->mPos, pMainCam->mLookAt, desc, &cascadeCam);
+
+        m4f cascadeView = getView(&cascadeCam);
+        m4f cascadeProj = getProj(&cascadeCam);
+
+        debugAddFrustum(pSceneRenderer, cascadeView, cascadeProj, cascadeColors[i], 0);
+
+        v3f corners[8];
+        frustumCorners(cascadeView, cascadeProj, corners, 0);
+
+        // TODO(caio): Texel snapping
+        // https://alextardif.com/shadowmapping.html
+        // v3f sphereCenter = {0,0,0};
+        // for(int32 fc = 0; fc < 8; fc++)
+        // {
+        //     sphereCenter = sphereCenter + corners[fc];
+        // }
+        // sphereCenter = sphereCenter * (1.f/8.f);
+
+        // float sphereRadius = 0.f;
+        // for(int32 fc = 0; fc < 8; fc++)
+        // {
+        //     sphereRadius = MAX(sphereRadius, magn(corners[fc] - sphereCenter));
+        // }
+
+        // debugAddSphere(pSceneRenderer, sphereCenter, sphereRadius, cascadeColors[i], 32, 32);
+
+        // v3f lightDir = pSceneRenderer->mDirLight.mDir;
+        // v3f frustumCenter = sphereCenter - (lightDir * sphereRadius * 2.f);
+
+        // m4f frustumView = lookAtViewRH(frustumCenter, sphereCenter, {0,1,0});
+        // m4f frustumProj = orthoRH(-sphereRadius, sphereRadius, -sphereRadius, sphereRadius, -sphereRadius * 6.f, sphereRadius * 6.f);
+
+        // debugAddFrustum(pSceneRenderer, frustumView, frustumProj, cascadeColors[i]);
+    }
+}
+
 void debugGeometry(SceneRenderer* pSceneRenderer)
 {
     pSceneRenderer->mDebugVerts.clear();
 
+    static Camera debugCam = pSceneRenderer->mCamera;
+
     if(pSceneRenderer->mFreezeMainCam)
     {
-        uint32 frame = pSceneRenderer->pRenderer->mActiveFrame;
-        PerFrameUniforms& frameUniforms = pSceneRenderer->perFrameUniforms[frame];
+        debugAddCascadeFrustums(pSceneRenderer, &debugCam);
 
-        Scene* pScene = pSceneRenderer->pScene;
-        Frustum camFrustum = frustum(matMul(frameUniforms.mMainProj, frameUniforms.mMainView));
+        // uint32 frame = pSceneRenderer->pRenderer->mActiveFrame;
+        // PerFrameUniforms& frameUniforms = pSceneRenderer->perFrameUniforms[frame];
 
-        debugAddFrustum(pSceneRenderer, frameUniforms.mMainView, frameUniforms.mMainProj, {1,0,1});
+        // Scene* pScene = pSceneRenderer->pScene;
+        // Frustum camFrustum = frustum(matMul(frameUniforms.mMainProj, frameUniforms.mMainView));
+
+        // debugAddFrustum(pSceneRenderer, frameUniforms.mMainView, frameUniforms.mMainProj, {1,0,1});
 
         // AABB + frustum culling debug
         // for(int32 i = 0; i < pScene->mNodeCount; i++)
@@ -1083,6 +1167,10 @@ void debugGeometry(SceneRenderer* pSceneRenderer)
         //         debugAddAABB(pSceneRenderer, nodeAABB, identity(), {1,1,1});
         //     }
         // }
+    }
+    else
+    {
+        debugCam = pSceneRenderer->mCamera;
     }
 
     // Add debug geometry here
@@ -1103,6 +1191,39 @@ void debugGeometry(SceneRenderer* pSceneRenderer)
 void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze)
 {
     pSceneRenderer->mFreezeMainCam = freeze;
+}
+
+void addUIControls(SceneRenderer* pSceneRenderer)
+{
+    uiSeparator(str("Camera Settings"));
+    uiDragf(str("Near Plane"), &pSceneRenderer->mCamera.mDesc.mNear, 0.1f, 0.0001f, 10.f);
+    uiDragf(str("Far Plane"), &pSceneRenderer->mCamera.mDesc.mFar, 1.f, 10.f, 100.f);
+    // Controls are for fovX, but camera stores fovY
+    static float fovX = 90.f;
+    float aspect = getAspectRatio(pSceneRenderer->pApp);
+    uiDragf(str("FoV (X)"), &fovX, 1.f, 30.f, 150.f);
+    pSceneRenderer->mCamera.mDesc.mFovY = fovHtoV(TO_RAD(fovX), aspect);
+
+    uiSeparator(str("Light Settings"));
+    uiSlider3f(str("Direction"), 
+            &pSceneRenderer->mDirLight.mDir.mData[0], 
+            -1.f, 1.f);
+    uiSliderf(str("Intensity"), &pSceneRenderer->mDirLight.mIntensity, 0.f, 10.f);
+    uiColor3f(str("Color"), 
+            &pSceneRenderer->mDirLight.mColor.mData[0]);
+    uiSliderf(str("Ambient"), &pSceneRenderer->mAmbient, 0.f, 1.f);
+
+    uiSeparator(str("Shadow Settings"));
+    uiSliderf(str("Cascade Split Factor"), &pSceneRenderer->mShadowSettings.kSplitFactor, 0.f, 1.f);
+
+    uiSeparator(str("Profiling"));
+    static bool showGpuTimings = false;
+    uiCheckbox(str("Show GPU Timings"), &showGpuTimings);
+    if(showGpuTimings)
+    {
+        uiGpuTimingsWindow(&pSceneRenderer->pApp->mAppArena, &pSceneRenderer->mGpuTimer, 
+                -400, 0, 400, 0);
+    }
 }
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
@@ -1436,17 +1557,9 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         bindDesc.mColorBindings[0] = { pRTColor, LOAD_OP_LOAD, STORE_OP_STORE };
 
         uiStartFrame();
-        uiSlider3f(str("Light Direction"), 
-                &pSceneRenderer->mDirLight.mDir.mData[0], 
-                -1.f, 1.f);
-        uiSliderf(str("Light Intensity"), &pSceneRenderer->mDirLight.mIntensity, 0.f, 10.f);
-        uiColor3f(str("Light Color"), 
-                &pSceneRenderer->mDirLight.mColor.mData[0]);
-        uiSliderf(str("Ambient"), &pSceneRenderer->mAmbient, 0.f, 1.f);
-        uiSeparator();
-        uiGpuTimingsWindow(&pSceneRenderer->pApp->mAppArena, &pSceneRenderer->mGpuTimer, 
-                -400, 0, 400, 0);
+        addUIControls(pSceneRenderer);
         uiEndFrame(pCmd, bindDesc);
+
         gpuTimestamp(str("UI pass"), &gpuTimerParams);
     }
 
