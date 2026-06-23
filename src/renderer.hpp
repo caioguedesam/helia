@@ -6,7 +6,12 @@
 #include "../dw/src/render/render.hpp"
 #include "../dw/src/render/camera.hpp"
 #include "../dw/src/render/timings.hpp"
-#include "scene.hpp"
+#include "../dw/src/render/ui.hpp"
+#include "../src/shared_defines.hpp"
+#include "../src/scene.hpp"
+#include "../src/draw_buffers.hpp"
+
+struct SceneRenderer;
 
 struct DirectionalLight
 {
@@ -15,11 +20,13 @@ struct DirectionalLight
     v3f mColor = {1,1,1};
 };
 
-#define MAX_CASCADES 3
 struct ShadowSettings
 {
     float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
 };
+
+void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances);
+m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade);
 
 struct PerFrameUniforms
 {
@@ -37,15 +44,17 @@ struct PerFrameUniforms
     v4f mPadding0[1];
 };
 
-struct PerDrawData
+//struct PerDrawData
+//{
+//    uint32 mNodeIdOpaque = MAX_UINT32;
+//    uint32 mNodeIdDoubleSided = MAX_UINT32;
+//};
+
+struct InstanceData
 {
-    uint32 mNodeIdOpaque = MAX_UINT32;
-    uint32 mNodeIdDoubleSided = MAX_UINT32;
+    uint32 mNodeId = MAX_UINT32;
 };
 
-#define MAX_DEBUG_VERTS 1000000
-#define HIZ_MAX 10
-#define SHADOW_MAP_SIZE 1024
 struct SceneRenderer
 {
     // References
@@ -53,9 +62,10 @@ struct SceneRenderer
     Renderer* pRenderer = NULL;
     AssetManager* pAssetManager = NULL;
     Scene* pScene = NULL;
+    UIState* pUI = NULL;
 
     // Render data
-    PerFrameUniforms perFrameUniforms[CONCURRENT_FRAMES];
+    PerFrameUniforms perFrameUniforms = {};
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
     ShadowSettings mShadowSettings = {};
@@ -75,25 +85,22 @@ struct SceneRenderer
     Buffer* pSBSceneNodes           = NULL;
     Buffer* pSBSceneMeshes          = NULL;
     Buffer* pSBSceneMaterials       = NULL;
-    Buffer* pUBPerFrame             = NULL;
+
+    Buffer* pUBPerFrame[CONCURRENT_FRAMES]                  = { NULL, NULL };
+    Buffer* pSBInstancesShadow[CONCURRENT_FRAMES]           = { NULL, NULL };
+    Buffer* pSBInstancesOpaque[CONCURRENT_FRAMES]           = { NULL, NULL };
+    Buffer* pSBInstancesOpaqueDouble[CONCURRENT_FRAMES]     = { NULL, NULL };
 
     Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
     uint32 mMaterialMapCount = 0;
     Sampler* pSamplerLinear = NULL;
     Sampler* pSamplerPoint = NULL;
     
-    // Draw call buffers
-    // Passes:
-    // - Opaque objects
-    // - Double-sided opaque objects
-    Buffer* pDBDrawCmdsOpaque = NULL;
-    Buffer* pDBDrawCmdsOpaqueDoubleSided = NULL;
-    Buffer* pDBDrawCmdCount = NULL;
-    Buffer* pSBPerDraw = NULL;
+    DrawBuffers mDrawBuffers = {};
 
     // Descriptor sets
-    DescriptorSet* pDSPerFrame = NULL;
-    DescriptorSet* pDSGlobal = NULL;
+    DescriptorSet* pDSPersistent = NULL;
+    DescriptorSet* pDSPerFrame[CONCURRENT_FRAMES] = {NULL, NULL};
 
     // Draw call buffer pass
     Shader* pCSGenerateDraws = NULL;
@@ -107,6 +114,12 @@ struct SceneRenderer
 
     // Shadow map pass
     RenderTarget* pRTShadowMaps[MAX_CASCADES];
+    Shader* pVSShadowMapPass = NULL;
+    Shader* pPSShadowMapPass = NULL;
+    Shader* pVSShadowMapPassDoubleSided = NULL;
+    Shader* pPSShadowMapPassDoubleSided = NULL;
+    GraphicsPipeline* pPipeShadowMapPass = NULL;
+    GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth = NULL;
@@ -150,7 +163,7 @@ struct SceneRenderer
 };
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
-        App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
+        App* pApp, Renderer* pRenderer, AssetManager* pAssetManager, UIState* pUI,
         Scene* pScene, 
         String rootPath);
 void destroySceneRenderer(SceneRenderer* pSceneRenderer);
@@ -180,7 +193,8 @@ void debugAddVector(SceneRenderer* pSceneRenderer, v3f start, v3f dir, v3f color
 void debugAddPlane(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f p3, v3f color1, v3f color2);
 void debugAddAABB(SceneRenderer* pSceneRenderer, AABB aabb, m4f xform, v3f color);
 void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f color, float zOffset = 0.00001f);
-void debugGeometry(SceneRenderer* pSceneRenderer);
+void debugGeometryStart(SceneRenderer* pSceneRenderer);
+void debugGeometryEnd(SceneRenderer* pSceneRenderer);
 void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze);
 
 void addUIControls(SceneRenderer* pSceneRenderer);

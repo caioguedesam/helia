@@ -11,9 +11,75 @@
 #include "dw/src/render/buffer.hpp"
 #include "dw/src/render/camera.hpp"
 #include "dw/src/render/shader.hpp"
+#include "src/draw_buffers.hpp"
+
+void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances)
+{
+    // https://developer.nvidia.com/gpugems/gpugems3/part-ii-light-and-shadows/chapter-10-parallel-split-shadow-maps-programmable-gpus
+
+    float zNear = pCam->mDesc.mNear;
+    float zFar = pCam->mDesc.mFar;
+
+    float lambda = pSceneRenderer->mShadowSettings.kSplitFactor;
+
+    // Distances are stored as far plane for respective cascade.
+    // Near for cascade n is far for cascade n-1.
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        float cLog = zNear * powf((zFar / zNear), (float)(i + 1) / MAX_CASCADES);
+        float cLin = zNear + ((zFar - zNear) * (float)(i + 1) / MAX_CASCADES);
+        pDistances[i] = lambda * cLog + (1.f - lambda) * cLin;
+    }
+}
+
+m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade)
+{
+    ASSERT(cascade < MAX_CASCADES);
+
+    // Make cascade sub-frustum from main camera frustum
+    Camera cascadeCam;
+    CameraDesc desc = pSceneRenderer->mCamera.mDesc;
+    if(cascade > 0)
+    {
+        desc.mNear = pDistances[cascade - 1];
+    }
+    desc.mFar = pDistances[cascade];
+    initCamera(pSceneRenderer->mCamera.mPos, pSceneRenderer->mCamera.mLookAt, desc, &cascadeCam);
+
+    m4f cascadeView = getView(&cascadeCam);
+    m4f cascadeProj = getProj(&cascadeCam);
+
+    v3f corners[8];
+    frustumCorners(cascadeView, cascadeProj, corners, 0);
+
+    // https://alextardif.com/shadowmapping.html
+    // Make bounding sphere to contain all of cascade's sub-frustum
+    v3f sphereCenter = {0,0,0};
+    for(int32 fc = 0; fc < 8; fc++)
+    {
+        sphereCenter = sphereCenter + corners[fc];
+    }
+    sphereCenter = sphereCenter * (1.f/8.f);
+
+    float sphereRadius = 0.f;
+    for(int32 fc = 0; fc < 8; fc++)
+    {
+        sphereRadius = MAX(sphereRadius, magn(corners[fc] - sphereCenter));
+    }
+
+    // Make an orthographic frustum that encompasses the entire bounding sphere
+    // TODO(caio): Texel snapping
+    v3f lightDir = pSceneRenderer->mDirLight.mDir;
+    v3f frustumCenter = sphereCenter + (lightDir * sphereRadius * 2.f);
+
+    m4f frustumView = lookAtViewRH(frustumCenter, sphereCenter, {0,1,0});
+    m4f frustumProj = orthoRH(-sphereRadius, sphereRadius, sphereRadius, -sphereRadius, -sphereRadius * 6.f, sphereRadius * 6.f);
+
+    return matMul(frustumProj, frustumView);
+}
 
 void initSceneRenderer(SceneRenderer* pSceneRenderer,
-        App* pApp, Renderer* pRenderer, AssetManager* pAssetManager,
+        App* pApp, Renderer* pRenderer, AssetManager* pAssetManager, UIState* pUI,
         Scene* pScene, 
         String rootPath)
 {
@@ -26,6 +92,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     pSceneRenderer->pRenderer = pRenderer;
     pSceneRenderer->pAssetManager = pAssetManager;
     pSceneRenderer->pScene = pScene;
+    pSceneRenderer->pUI = pUI;
 
     // Load textures from scene model
     {
@@ -106,6 +173,14 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             0, 2, 1,
         };
 
+    // // Draw call buffers
+    // // Passes:
+    // // - Opaque objects
+    // // - Double-sided opaque objects
+    // Buffer* pDBDrawCmdsOpaque = NULL;
+    // Buffer* pDBDrawCmdsOpaqueDoubleSided = NULL;
+    // Buffer* pDBDrawCmdCount = NULL;
+    // Buffer* pSBPerDraw = NULL;
         BufferDesc vbDesc = {};
         vbDesc.mType = BUFFER_TYPE_VERTEX;
         vbDesc.mSize = ARR_LEN(vertexData) * sizeof(float);
@@ -184,36 +259,31 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     }
 
     // GPU draw call buffers
-    {
-        BufferDesc desc = {};
-        desc.mType = BUFFER_TYPE_INDIRECT;
-        desc.mSize = sizeof(IndirectDraw) * SCENE_MAX_DRAWS;
-        desc.mCount = SCENE_MAX_DRAWS;
-        desc.mStride = sizeof(IndirectDraw);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmdsOpaque);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided);
-
-        desc.mType = BUFFER_TYPE_INDIRECT;
-        desc.mSize = sizeof(uint32) * 2;
-        desc.mCount = 2;
-        desc.mStride = sizeof(uint32);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pDBDrawCmdCount);
-
-        desc.mType = (BufferType)(BUFFER_TYPE_STORAGE | BUFFER_TYPE_TRANSFER_DST);
-        desc.mSize = sizeof(PerDrawData) * SCENE_MAX_DRAWS;
-        desc.mCount = SCENE_MAX_DRAWS;
-        desc.mStride = sizeof(PerDrawData);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pSBPerDraw);
-    }
+    initDrawBuffers(pSceneRenderer->pRenderer, &pSceneRenderer->mDrawBuffers);
 
     // Per frame data uniform buffer
+    for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
     {
         BufferDesc desc = {};
         desc.mType = BUFFER_TYPE_UNIFORM;
-        desc.mSize = sizeof(PerFrameUniforms) * 2;
+        desc.mSize = sizeof(PerFrameUniforms);
         desc.mCount = 1;
         desc.mStride = sizeof(PerFrameUniforms);
-        addBuffer(pRenderer, desc, &pSceneRenderer->pUBPerFrame);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pUBPerFrame[i]);
+    }
+
+    // Instance buffers
+    for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
+    {
+        BufferDesc desc = {};
+        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mSize = MAX_DRAWS * sizeof(InstanceData);
+        desc.mCount = 1;
+        desc.mStride = sizeof(InstanceData);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBInstancesOpaque[i]);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBInstancesOpaqueDouble[i]);
+        desc.mSize *= MAX_CASCADES;
+        addBuffer(pRenderer, desc, &pSceneRenderer->pSBInstancesShadow[i]);
     }
 
     // App controls
@@ -255,11 +325,14 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
 
     removeSampler(pRenderer, &pSceneRenderer->pSamplerLinear);
     removeSampler(pRenderer, &pSceneRenderer->pSamplerPoint);
-    removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame);
-    removeBuffer(pRenderer, &pSceneRenderer->pSBPerDraw);
-    removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdCount);
-    removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided);
-    removeBuffer(pRenderer, &pSceneRenderer->pDBDrawCmdsOpaque);
+    for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
+    {
+        removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame[i]);
+        removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesOpaque[i]);
+        removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesOpaqueDouble[i]);
+        removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesShadow[i]);
+    }
+    destroyDrawBuffers(pRenderer, &pSceneRenderer->mDrawBuffers);
     removeBuffer(pRenderer, &pSceneRenderer->pVBScreenQuad);
     removeBuffer(pRenderer, &pSceneRenderer->pIBScreenQuad);
     removeBuffer(pRenderer, &pSceneRenderer->pVBDebug);
@@ -404,6 +477,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
     String hiZDownsampleShaderPath = str("../../res/shaders/hiz_downsample.glsl");
     String depthPrepassShaderPath = str("../../res/shaders/depth_prepass.glsl");
+    String shadowPassShaderPath = str("../../res/shaders/shadow_map_pass.glsl");
     String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
     String lightingShaderPath = str("../../res/shaders/lighting.glsl");
     String debugShaderPath = str("../../res/shaders/debug.glsl");
@@ -432,6 +506,11 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
         {depthPrepassShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSDepthPrePass},
         {depthPrepassShaderPath, SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pVSDepthPrePassDoubleSided},
         {depthPrepassShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSDepthPrePassDoubleSided},
+
+        {shadowPassShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSShadowMapPass},
+        {shadowPassShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSShadowMapPass},
+        {shadowPassShaderPath, SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pVSShadowMapPassDoubleSided},
+        {shadowPassShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSShadowMapPassDoubleSided},
 
         {gbufferShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSGBuffer},
         {gbufferShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSGBuffer},
@@ -466,7 +545,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
 void addSceneDescriptors(SceneRenderer* pSceneRenderer)
 {
     // Scene global descriptor set
-    if(!pSceneRenderer->pDSGlobal)
+    if(!pSceneRenderer->pDSPersistent)
     {
         Texture* storageDepthTextures[HIZ_MAX];
         for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
@@ -481,44 +560,91 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         }
 
         DescriptorSetDesc desc = {};
-        desc.mCount = 16;
+        desc.mCount = 12;
         // TODO(caio): Buffer arrays?
-        desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaque, 1 };
-        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 1 };
-        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pDBDrawCmdCount, 1 };
-        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBPerDraw, 1 };
-        desc.mResources[4] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
-        desc.mResources[5] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
-        desc.mResources[6] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMaterials, 1 };
-        desc.mResources[7] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pTexMaterialMaps, 
+        desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
+        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
+        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMaterials, 1 };
+        desc.mResources[3] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pTexMaterialMaps, 
             pSceneRenderer->mMaterialMapCount, 
             SCENE_MAX_TEXTURES };
-        desc.mResources[8] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerLinear, 1 };
-        desc.mResources[9] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
-        desc.mResources[10] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
-        desc.mResources[11] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
-        desc.mResources[12] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
-        desc.mResources[13] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
-        desc.mResources[14] = { DESCRIPTOR_STORAGE_IMAGE, storageDepthTextures,
+        desc.mResources[4] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerLinear, 1 };
+        desc.mResources[5] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
+        desc.mResources[6] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
+        desc.mResources[7] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
+        desc.mResources[8] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
+        desc.mResources[9] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
+        desc.mResources[10] = { DESCRIPTOR_STORAGE_IMAGE, storageDepthTextures,
             pSceneRenderer->mDepthHierarchyCount,
             HIZ_MAX};
-        desc.mResources[15] = { DESCRIPTOR_TEXTURE, shadowMapTextures,
+        desc.mResources[11] = { DESCRIPTOR_TEXTURE, shadowMapTextures,
             MAX_CASCADES, MAX_CASCADES};
-        addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSGlobal);
+        addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSPersistent);
     }
 
     // Per frame resource set
-    if(!pSceneRenderer->pDSPerFrame)
+    if(!pSceneRenderer->pDSPerFrame[0])
     {
-        DescriptorSetDesc desc = {};
-        desc.mCount = 1;
-        desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pSceneRenderer->pUBPerFrame, 1 };
-        addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSPerFrame);
+        for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
+        {
+            DescriptorSetDesc desc = {};
+            desc.mCount = 6;
+            desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pSceneRenderer->pUBPerFrame[i], 1 };
+            desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->mDrawBuffers.pDrawBuffers[i], 1 };
+            desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->mDrawBuffers.pDrawCountBuffers[i], 1 };
+            desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesOpaque[i], 1 };
+            desc.mResources[4] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesOpaqueDouble[i], 1 };
+            desc.mResources[5] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesShadow[i], 1 };
+            addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSPerFrame[i]);
+        }
     }
 }
 
 void addScenePipelines(SceneRenderer* pSceneRenderer)
 {
+    // Shadow pass pipeline
+    {
+        GraphicsPipelineDesc desc = {};
+        desc.mRenderTargetCount = 0;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTShadowMaps[0]->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
+        desc.pVS = pSceneRenderer->pVSShadowMapPass;
+        desc.pFS = pSceneRenderer->pPSShadowMapPass;
+
+        desc.mCullMode = CULL_MODE_BACK;
+        desc.mFrontFace = FRONT_FACE_CCW;
+
+        desc.mDepthTest = true;
+        desc.mDepthWrite = true;
+        desc.mDepthOp = COMPARE_GREATER;
+
+        desc.mDescriptorSetCount = 2;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
+
+        // Constants:
+        // - Active frame (uint32)
+        // - Current cascade
+        desc.mConstantBlockCount = 1;
+        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+
+        if(!pSceneRenderer->pPipeShadowMapPass)
+        {
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeShadowMapPass);
+        }
+
+        desc.mCullMode = CULL_MODE_NONE;
+        desc.pVS = pSceneRenderer->pVSShadowMapPassDoubleSided;
+        desc.pFS = pSceneRenderer->pPSShadowMapPassDoubleSided;
+        if(!pSceneRenderer->pPipeShadowMapPassDoubleSided)
+        {
+            addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeShadowMapPassDoubleSided);
+        }
+    }
+
+
     // Depth pre-pass pipeline
     {
         GraphicsPipelineDesc desc = {};
@@ -537,8 +663,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mDepthOp = COMPARE_GREATER;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Active frame (uint32)
@@ -583,8 +709,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mDepthOp = COMPARE_EQUAL;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Active frame (uint32)
@@ -613,8 +739,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pCS = pSceneRenderer->pCSGenerateDraws;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Total node count (uint32)
@@ -639,8 +765,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pCS = pSceneRenderer->pCSHiZDownsample;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Base mip (uint32)
@@ -670,8 +796,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mDepthWrite = false;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Active frame (uint32)
@@ -702,8 +828,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mDepthWrite = false;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         // - Active frame (uint32)
@@ -732,8 +858,8 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mDepthWrite = false;
 
         desc.mDescriptorSetCount = 2;
-        desc.pDescriptorSets[0] = pSceneRenderer->pDSPerFrame;
-        desc.pDescriptorSets[1] = pSceneRenderer->pDSGlobal;
+        desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
+        desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
         desc.mConstantBlockCount = 0;
@@ -763,6 +889,10 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
 {
     Shader** shaders[] =
     {
+        &pSceneRenderer->pVSShadowMapPass,
+        &pSceneRenderer->pPSShadowMapPass,
+        &pSceneRenderer->pVSShadowMapPassDoubleSided,
+        &pSceneRenderer->pPSShadowMapPassDoubleSided,
         &pSceneRenderer->pVSDepthPrePass,
         &pSceneRenderer->pPSDepthPrePass,
         &pSceneRenderer->pVSDepthPrePassDoubleSided,
@@ -793,14 +923,23 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
 
 void removeSceneDescriptors(SceneRenderer* pSceneRenderer)
 {
-    if(pSceneRenderer->pDSGlobal)
-        removeDescriptorSet(pSceneRenderer->pRenderer, &pSceneRenderer->pDSGlobal);
-    if(pSceneRenderer->pDSPerFrame)
-        removeDescriptorSet(pSceneRenderer->pRenderer, &pSceneRenderer->pDSPerFrame);
+    if(pSceneRenderer->pDSPersistent)
+        removeDescriptorSet(pSceneRenderer->pRenderer, &pSceneRenderer->pDSPersistent);
+    if(pSceneRenderer->pDSPerFrame[0])
+    {
+        for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
+        {
+            removeDescriptorSet(pSceneRenderer->pRenderer, &pSceneRenderer->pDSPerFrame[i]);
+        }
+    }
 }
 
 void removeScenePipelines(SceneRenderer* pSceneRenderer)
 {
+    if(pSceneRenderer->pPipeShadowMapPass)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeShadowMapPass);
+    if(pSceneRenderer->pPipeShadowMapPassDoubleSided)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeShadowMapPassDoubleSided);
     if(pSceneRenderer->pPipeDepthPrePass)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeDepthPrePass);
     if(pSceneRenderer->pPipeDepthPrePassDoubleSided)
@@ -825,21 +964,28 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
 
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
 {
-    uint32 activeFrame = pSceneRenderer->pRenderer->mActiveFrame;
     m4f cameraView = getView(&pSceneRenderer->mCamera);
     m4f cameraProj = getProj(&pSceneRenderer->mCamera);
-    pSceneRenderer->perFrameUniforms[activeFrame].mView = cameraView;
-    pSceneRenderer->perFrameUniforms[activeFrame].mProj = cameraProj;
-    pSceneRenderer->perFrameUniforms[activeFrame].mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
+    pSceneRenderer->perFrameUniforms.mView = cameraView;
+    pSceneRenderer->perFrameUniforms.mProj = cameraProj;
+    pSceneRenderer->perFrameUniforms.mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
     if(!pSceneRenderer->mFreezeMainCam)
     {
-        pSceneRenderer->perFrameUniforms[activeFrame].mMainView = cameraView;
-        pSceneRenderer->perFrameUniforms[activeFrame].mMainProj = cameraProj;
+        pSceneRenderer->perFrameUniforms.mMainView = cameraView;
+        pSceneRenderer->perFrameUniforms.mMainProj = cameraProj;
+    }
+
+    float cascadeSplitDistances[MAX_CASCADES];
+    getCascadeDistances(pSceneRenderer, &pSceneRenderer->mCamera, cascadeSplitDistances);
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        m4f cascadeViewProj = getCascadeViewProj(pSceneRenderer, &pSceneRenderer->mCamera, cascadeSplitDistances, i);
+        pSceneRenderer->perFrameUniforms.mShadowCascadesViewProj[i] = cascadeViewProj;
     }
 
     DirectionalLight light = pSceneRenderer->mDirLight;
-    pSceneRenderer->perFrameUniforms[activeFrame].mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
-    pSceneRenderer->perFrameUniforms[activeFrame].mDirLight2 = to4f(light.mColor, pSceneRenderer->mAmbient);
+    pSceneRenderer->perFrameUniforms.mDirLight1 = to4f(normalize(light.mDir), light.mIntensity);
+    pSceneRenderer->perFrameUniforms.mDirLight2 = to4f(light.mColor, pSceneRenderer->mAmbient);
 }
 
 void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
@@ -847,9 +993,9 @@ void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
     Renderer* pRenderer = pSceneRenderer->pRenderer;
     uint32 activeFrame = pRenderer->mActiveFrame;
     copyToBuffer(pRenderer, 
-            pSceneRenderer->pUBPerFrame, 
-            sizeof(PerFrameUniforms) * activeFrame, 
-            &pSceneRenderer->perFrameUniforms[activeFrame], 
+            pSceneRenderer->pUBPerFrame[activeFrame], 
+            0, 
+            &pSceneRenderer->perFrameUniforms, 
             sizeof(PerFrameUniforms));
 }
 
@@ -1060,25 +1206,6 @@ void debugAddFrustum(SceneRenderer* pSceneRenderer, m4f view, m4f proj, v3f colo
     debugAddTri(pSceneRenderer, corners[3], corners[7], corners[5], color);
 }
 
-void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances)
-{
-    // https://developer.nvidia.com/gpugems/gpugems3/part-ii-light-and-shadows/chapter-10-parallel-split-shadow-maps-programmable-gpus
-
-    float zNear = pCam->mDesc.mNear;
-    float zFar = pCam->mDesc.mFar;
-
-    float lambda = pSceneRenderer->mShadowSettings.kSplitFactor;
-
-    // Distances are stored as far plane for respective cascade.
-    // Near for cascade n is far for cascade n-1.
-    for(int32 i = 0; i < MAX_CASCADES; i++)
-    {
-        float cLog = zNear * powf((zFar / zNear), (float)(i + 1) / MAX_CASCADES);
-        float cLin = zNear + ((zFar - zNear) * (float)(i + 1) / MAX_CASCADES);
-        pDistances[i] = lambda * cLog + (1.f - lambda) * cLin;
-    }
-}
-
 // TODO(caio): Move this somewhere else and to header when actually drawing shadow maps
 void debugAddCascadeFrustums(SceneRenderer* pSceneRenderer, Camera* pMainCam)
 {
@@ -1114,59 +1241,43 @@ void debugAddCascadeFrustums(SceneRenderer* pSceneRenderer, Camera* pMainCam)
 
         // TODO(caio): Texel snapping
         // https://alextardif.com/shadowmapping.html
-        // v3f sphereCenter = {0,0,0};
-        // for(int32 fc = 0; fc < 8; fc++)
-        // {
-        //     sphereCenter = sphereCenter + corners[fc];
-        // }
-        // sphereCenter = sphereCenter * (1.f/8.f);
+        v3f sphereCenter = {0,0,0};
+        for(int32 fc = 0; fc < 8; fc++)
+        {
+            sphereCenter = sphereCenter + corners[fc];
+        }
+        sphereCenter = sphereCenter * (1.f/8.f);
 
-        // float sphereRadius = 0.f;
-        // for(int32 fc = 0; fc < 8; fc++)
-        // {
-        //     sphereRadius = MAX(sphereRadius, magn(corners[fc] - sphereCenter));
-        // }
+        float sphereRadius = 0.f;
+        for(int32 fc = 0; fc < 8; fc++)
+        {
+            sphereRadius = MAX(sphereRadius, magn(corners[fc] - sphereCenter));
+        }
 
-        // debugAddSphere(pSceneRenderer, sphereCenter, sphereRadius, cascadeColors[i], 32, 32);
+        //debugAddSphere(pSceneRenderer, sphereCenter, sphereRadius, cascadeColors[i], 32, 32);
 
-        // v3f lightDir = pSceneRenderer->mDirLight.mDir;
-        // v3f frustumCenter = sphereCenter - (lightDir * sphereRadius * 2.f);
+        v3f lightDir = pSceneRenderer->mDirLight.mDir;
+        v3f frustumCenter = sphereCenter - (lightDir * sphereRadius * 2.f);
 
-        // m4f frustumView = lookAtViewRH(frustumCenter, sphereCenter, {0,1,0});
-        // m4f frustumProj = orthoRH(-sphereRadius, sphereRadius, -sphereRadius, sphereRadius, -sphereRadius * 6.f, sphereRadius * 6.f);
+        m4f frustumView = lookAtViewRH(frustumCenter, sphereCenter, {0,1,0});
+        m4f frustumProj = orthoRH(-sphereRadius, sphereRadius, -sphereRadius, sphereRadius, -sphereRadius * 6.f, sphereRadius * 6.f);
 
-        // debugAddFrustum(pSceneRenderer, frustumView, frustumProj, cascadeColors[i]);
+        debugAddFrustum(pSceneRenderer, frustumView, frustumProj, cascadeColors[i]);
     }
 }
 
-void debugGeometry(SceneRenderer* pSceneRenderer)
+void debugGeometryStart(SceneRenderer* pSceneRenderer)
 {
     pSceneRenderer->mDebugVerts.clear();
+}
 
+void debugGeometryEnd(SceneRenderer* pSceneRenderer)
+{
     static Camera debugCam = pSceneRenderer->mCamera;
 
     if(pSceneRenderer->mFreezeMainCam)
     {
         debugAddCascadeFrustums(pSceneRenderer, &debugCam);
-
-        // uint32 frame = pSceneRenderer->pRenderer->mActiveFrame;
-        // PerFrameUniforms& frameUniforms = pSceneRenderer->perFrameUniforms[frame];
-
-        // Scene* pScene = pSceneRenderer->pScene;
-        // Frustum camFrustum = frustum(matMul(frameUniforms.mMainProj, frameUniforms.mMainView));
-
-        // debugAddFrustum(pSceneRenderer, frameUniforms.mMainView, frameUniforms.mMainProj, {1,0,1});
-
-        // AABB + frustum culling debug
-        // for(int32 i = 0; i < pScene->mNodeCount; i++)
-        // {
-        //     SceneNode* pNode = &pScene->mNodes[i];
-        //     AABB nodeAABB = { to3f(pNode->mMinAABB), to3f(pNode->mMaxAABB) };
-        //     if(inFrustum(nodeAABB, camFrustum))
-        //     {
-        //         debugAddAABB(pSceneRenderer, nodeAABB, identity(), {1,1,1});
-        //     }
-        // }
     }
     else
     {
@@ -1215,6 +1326,19 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
     uiSeparator(str("Shadow Settings"));
     uiSliderf(str("Cascade Split Factor"), &pSceneRenderer->mShadowSettings.kSplitFactor, 0.f, 1.f);
+    static bool showShadowMaps = false;
+    uiCheckbox(str("Show Shadow Maps"), &showShadowMaps);
+    if(showShadowMaps)
+    {
+        uiStartWindow(str("Shadow Maps"), -400, 0, 400, 0);
+        for(int32 i = 0; i < MAX_CASCADES; i++)
+        {
+            Texture* pTex = pSceneRenderer->pRTShadowMaps[i]->pTexture;
+            Sampler* pSampler = pSceneRenderer->pSamplerPoint;
+            uiImage(pSceneRenderer->pUI, pTex, pSampler, 256, 256);
+        }
+        uiEndWindow();
+    }
 
     uiSeparator(str("Profiling"));
     static bool showGpuTimings = false;
@@ -1236,10 +1360,11 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     beginCmd(pCmd);
 
     // Start GPU timings
+    uint32 activeFrame = pRenderer->mActiveFrame; 
     GpuTimestampParams gpuTimerParams = {};
     gpuTimerParams.pGpuTimer = &pSceneRenderer->mGpuTimer;
     gpuTimerParams.pCmd = pCmd;
-    gpuTimerParams.queryPool = pRenderer->mActiveFrame;
+    gpuTimerParams.queryPool = activeFrame;
     gpuTimerReadResults(&gpuTimerParams);
     gpuTimerStart(&gpuTimerParams);
 
@@ -1247,52 +1372,85 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     uploadPerFrameUniforms(pSceneRenderer);
     gpuTimestamp(str("Upload PerFrame"), &gpuTimerParams);
 
-    // Depth pre pass
+    cmdPrepareDrawBuffers(pCmd, &pSceneRenderer->mDrawBuffers, activeFrame);
+
+    DescriptorSet* pDSPersistent = pSceneRenderer->pDSPersistent;
+    DescriptorSet* pDSPerFrame = pSceneRenderer->pDSPerFrame[activeFrame];
+
+    debugGeometryStart(pSceneRenderer);
+
+    // CSM draw call generation
     {
-        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
-        RenderTargetBarrier barriers[1];
-        barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+        ComputePipeline* pPipeline = pSceneRenderer->pPipeGenerateDrawsShadowMap;
 
-        RenderTargetBindDesc bindDesc = {};
-        bindDesc.mColorCount = 0;
-        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
-        cmdBindRenderTargets(pCmd, bindDesc);
+        cmdBindComputePipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
-        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDepthPrePass;
+        uint32 drawBufferConstants[2];
+        drawBufferConstants[0] = pSceneRenderer->pScene->mNodeCount;
+        drawBufferConstants[1] = activeFrame;
 
-        cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(drawBufferConstants), &drawBufferConstants[0]);
 
-        cmdSetViewport(pCmd, pRTDepth);
-        cmdSetScissor(pCmd, pRTDepth);
+        cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
+        
+        char buf[256];
+        String tsName = strf(buf, "Draw Buffer Pass (Shadows)");
+        gpuTimestamp(tsName, &gpuTimerParams);
+    }
 
-        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
-        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
+    // Cascaded Shadow Map pass
+    {
+        Barrier barrier = {};
+        barrier.mSrcStage = PIPELINE_STAGE_COMPUTE_SHADER;
+        barrier.mDstStage = PIPELINE_STAGE_DRAW_INDIRECT;
+        barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
+        barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
+        cmdBarrier(pCmd, 1, &barrier);
 
-        uint32 constants[1];
-        constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
+        for(int32 i = 0; i < MAX_CASCADES; i++)
+        {
+            RenderTarget* pRTDepth = pSceneRenderer->pRTShadowMaps[i];
+            RenderTargetBarrier barriers[1];
+            barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+            cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
-        // Opaque
-        cmdDrawIndexedIndirect(pCmd, 
-                pSceneRenderer->pDBDrawCmdsOpaque, 
-                pSceneRenderer->pDBDrawCmdCount, 
-                0,
-                SCENE_MAX_DRAWS);
+            RenderTargetBindDesc bindDesc = {};
+            bindDesc.mColorCount = 0;
+            bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
+            cmdBindRenderTargets(pCmd, bindDesc);
 
-        pPipeline = pSceneRenderer->pPipeDepthPrePassDoubleSided;
-        cmdBindGraphicsPipeline(pCmd, pPipeline);
-        // Double sided opaque
-        cmdDrawIndexedIndirect(pCmd, 
-                pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 
-                pSceneRenderer->pDBDrawCmdCount, 
-                sizeof(uint32),
-                SCENE_MAX_DRAWS);
+            GraphicsPipeline* pPipeline = pSceneRenderer->pPipeShadowMapPass;
 
-        cmdUnbindRenderTargets(pCmd);
-        gpuTimestamp(str("Depth Pre-pass"), &gpuTimerParams);
+            cmdBindGraphicsPipeline(pCmd, pPipeline);
+            cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+            cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
+
+            cmdSetViewport(pCmd, pRTDepth);
+            cmdSetScissor(pCmd, pRTDepth);
+
+            cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
+            cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
+
+            uint32 constants[2];
+            constants[0] = pRenderer->mActiveFrame;
+            constants[1] = i;
+            cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants);
+
+            cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_SHADOW_0 + i, activeFrame);
+
+            // TODO(caio): Reenable double sided shadow pass after draw buffers are working
+
+            cmdUnbindRenderTargets(pCmd);
+
+            barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
+            cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+            char buf[256];
+            String tsName = strf(buf, "Shadow Draw Pass (Cascade %d)", i);
+            gpuTimestamp(tsName, &gpuTimerParams);
+        }
     }
 
     // Hierarchical Z Downsampling pass
@@ -1301,8 +1459,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         ComputePipeline* pPipeline = pSceneRenderer->pPipeHiZDownsample;
 
         cmdBindComputePipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         v2u size = { 
             pSceneRenderer->pRTSceneDepth->mDesc.mWidth, 
@@ -1364,16 +1522,16 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         ComputePipeline* pPipeline = pSceneRenderer->pPipeGenerateDraws;
 
         cmdBindComputePipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         uint32 constants[2];
         constants[0] = pSceneRenderer->pScene->mNodeCount;
         constants[1] = pRenderer->mActiveFrame;
         cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants[0]);
 
-        cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
-        cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
+        //cmdFillBuffer(pCmd, pSceneRenderer->pDBDrawCmdCount, 0);
+        //cmdFillBuffer(pCmd, pSceneRenderer->pSBPerDraw, 0);
         cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
 
         gpuTimestamp(str("Generate Draws Pass"), &gpuTimerParams);
@@ -1384,6 +1542,57 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         barrier.mSrcAccess = MEMORY_ACCESS_SHADER_WRITE;
         barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
         cmdBarrier(pCmd, 1, &barrier);
+    }
+
+    // Depth pre pass
+    {
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
+        RenderTargetBarrier barriers[1];
+        barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        RenderTargetBindDesc bindDesc = {};
+        bindDesc.mColorCount = 0;
+        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDepthPrePass;
+
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
+
+        cmdSetViewport(pCmd, pRTDepth);
+        cmdSetScissor(pCmd, pRTDepth);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
+        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
+
+        uint32 constants[1];
+        constants[0] = pRenderer->mActiveFrame;
+        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
+
+        //- // Opaque
+        //- cmdDrawIndexedIndirect(pCmd, 
+        //-         pSceneRenderer->pDBDrawCmdsOpaque, 
+        //-         pSceneRenderer->pDBDrawCmdCount, 
+        //-         0,
+        //-         SCENE_MAX_DRAWS);
+        cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE, activeFrame);
+
+        pPipeline = pSceneRenderer->pPipeDepthPrePassDoubleSided;
+        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        //- // Double sided opaque
+        //- cmdDrawIndexedIndirect(pCmd, 
+        //-         pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 
+        //-         pSceneRenderer->pDBDrawCmdCount, 
+        //-         sizeof(uint32),
+        //-         SCENE_MAX_DRAWS);
+
+        cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE_DOUBLE, activeFrame);
+
+        cmdUnbindRenderTargets(pCmd);
+        gpuTimestamp(str("Depth Pre-pass"), &gpuTimerParams);
     }
 
     // GBuffer render pass
@@ -1409,8 +1618,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         cmdSetViewport(pCmd, pRTGBufferA);
         cmdSetScissor(pCmd, pRTGBufferA);
@@ -1423,20 +1632,22 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
 
         // Opaque
-        cmdDrawIndexedIndirect(pCmd, 
-                pSceneRenderer->pDBDrawCmdsOpaque, 
-                pSceneRenderer->pDBDrawCmdCount, 
-                0,
-                SCENE_MAX_DRAWS);
+        //- cmdDrawIndexedIndirect(pCmd, 
+        //-         pSceneRenderer->pDBDrawCmdsOpaque, 
+        //-         pSceneRenderer->pDBDrawCmdCount, 
+        //-         0,
+        //-         SCENE_MAX_DRAWS);
+        cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE, activeFrame);
 
         pPipeline = pSceneRenderer->pPipeGBufferDoubleSided;
         cmdBindGraphicsPipeline(pCmd, pPipeline);
         // Double sided opaque
-        cmdDrawIndexedIndirect(pCmd, 
-                pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 
-                pSceneRenderer->pDBDrawCmdCount, 
-                sizeof(uint32),
-                SCENE_MAX_DRAWS);
+        //- cmdDrawIndexedIndirect(pCmd, 
+        //-         pSceneRenderer->pDBDrawCmdsOpaqueDoubleSided, 
+        //-         pSceneRenderer->pDBDrawCmdCount, 
+        //-         sizeof(uint32),
+        //-         SCENE_MAX_DRAWS);
+        cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE_DOUBLE, activeFrame);
 
         cmdUnbindRenderTargets(pCmd);
         gpuTimestamp(str("GBuffer Pass"), &gpuTimerParams);
@@ -1464,8 +1675,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         cmdSetViewport(pCmd, pRTAccum);
         cmdSetScissor(pCmd, pRTAccum);
@@ -1485,7 +1696,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     }
 
     // Debug geometry pass
-    debugGeometry(pSceneRenderer);
+    debugGeometryEnd(pSceneRenderer);
     if(pSceneRenderer->mDebugVerts.mCount)
     {
         RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
@@ -1498,8 +1709,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         cmdSetViewport(pCmd, pRTAccum);
         cmdSetScissor(pCmd, pRTAccum);
@@ -1534,8 +1745,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSPerFrame, 0);
-        cmdBindDescriptorSet(pCmd, pPipeline, pSceneRenderer->pDSGlobal, 1);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
+        cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
         cmdSetViewport(pCmd, pRTPresent);
         cmdSetScissor(pCmd, pRTPresent);

@@ -15,7 +15,6 @@ VS_OUT(0) vec3 outColor;
 
 void main()
 {
-    PerFrameUniforms perFrame = perFrameUniforms[frameId];
     gl_Position = perFrame.mProj * perFrame.mView * vec4(inPosition, 1.0f);
     outColor = inColor;
 }

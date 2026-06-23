@@ -99,8 +99,6 @@ vec3 diffuseBRDF(vec3 surfaceColor, float metallic)
 
 void main()
 {
-    PerFrameUniforms perFrame = perFrameUniforms[frameId];
-
     vec4 sampleA = texture(sampler2D(gbufferA, samplerLinear), inUV);   // rgb = Diffuse color, a = Metallic
     vec4 sampleB = texture(sampler2D(gbufferB, samplerLinear), inUV);   // rg = Encoded normal, b = Roughness
     float depth = texture(sampler2D(depthBuffer, samplerLinear), inUV).r;

@@ -29,14 +29,14 @@ void main()
 {
     outUV = inUV;
 
-    PerDrawData drawData = perDraw[gl_DrawID];
 #if DOUBLE_SIDED
-    outNodeId = drawData.mNodeIdOpaqueDoubleSided;
+    InstanceData instanceData = instancesOpaqueDouble[gl_DrawID];
 #else
-    outNodeId = drawData.mNodeIdOpaque;
+    InstanceData instanceData = instancesOpaque[gl_DrawID];
 #endif
+    outNodeId = instanceData.mNodeId;
+
     SceneNode node = sceneNodes[outNodeId];
-    PerFrameUniforms perFrame = perFrameUniforms[frameId];
     vec4 worldPos = node.mTransform * vec4(inPosition, 1.0f);
     gl_Position = perFrame.mProj * perFrame.mView * worldPos;
 
@@ -92,7 +92,6 @@ void main()
 {
     SceneNode node = sceneNodes[inNodeId];
     SceneMaterial material = sceneMaterials[node.mMaterialId];
-    PerFrameUniforms perFrame = perFrameUniforms[frameId];
 
     // Diffuse color
     vec4 baseColor = texture(

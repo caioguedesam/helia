@@ -4,6 +4,7 @@
 DEFINE_CONSTANT_BLOCK
 {
     uint frameId;
+    uint cascade;
 };
 
 // ====================================================
@@ -18,16 +19,12 @@ VS_OUT(1) vec2 outUV;
 
 void main()
 {
-#if DOUBLE_SIDED
-    InstanceData instanceData = instancesOpaqueDouble[gl_DrawID];
-#else
-    InstanceData instanceData = instancesOpaque[gl_DrawID];
-#endif
+    InstanceData instanceData = instancesShadow[(cascade * MAX_DRAWS) + gl_DrawID];
     outNodeId = instanceData.mNodeId;
 
     SceneNode node = sceneNodes[outNodeId];
     vec4 worldPos = node.mTransform * vec4(inPosition, 1.0f);
-    gl_Position = perFrame.mProj * perFrame.mView * worldPos;
+    gl_Position = perFrame.mShadowCascadesViewProj[cascade] * worldPos;
 
     outUV = inUV;
 }

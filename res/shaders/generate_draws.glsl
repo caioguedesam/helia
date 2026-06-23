@@ -64,7 +64,7 @@ bool cameraFrustumTest(SceneNode node, PerFrameUniforms perFrame)
     return true;
 }
 
-bool shadowCascadeFrustumTest(SceneNode node, PerFrameUniforms perFrame, int cascade)
+bool shadowCascadeFrustumTest(SceneNode node, PerFrameUniforms perFrame, uint cascade)
 {
     if(cascade >= MAX_CASCADES)
     {
@@ -170,47 +170,67 @@ void main()
         return;
     }
 
-    // Debug
-    //if(idx != 2) return;
-
     SceneNode node = sceneNodes[idx];
     SceneMesh mesh = sceneMeshes[node.mMeshId];
     SceneMaterial mat = sceneMaterials[node.mMaterialId];
-    PerFrameUniforms perFrame = perFrameUniforms[frameId];
 
 #if SHADOW_MAP
+    // Shadow pass
+    for(int i = 0; i < MAX_CASCADES; i++)
+    {
+        uint drawBuffer = DB_SHADOW_0 + i;
+        if(shadowCascadeFrustumTest(node, perFrame, i))
+        {
+            uint drawIdx = atomicAdd(drawCounts[drawBuffer], 1);
+            
+            IndirectDraw draw;
+            draw.mIndexCount = mesh.mIndexCount;
+            draw.mInstanceCount = 1;
+            draw.mFirstIndex = mesh.mIndexStart;
+            draw.mVertexOffset = mesh.mVertexOffset;
+            draw.mFirstInstance = 0;
+
+            uint drawBufferOffset = drawBuffer * MAX_DRAWS + drawIdx;
+            drawBuffers[drawBufferOffset] = draw;
+
+            instancesShadow[(i * MAX_DRAWS) + drawIdx].mNodeId = idx;
+        }
+    }
 #else
     // Frustum culling
     if(!cameraFrustumTest(node, perFrame))
     {
         return;
     }
-
+    
     // Occlusion culling with Hi-Z
     if(!occlusionTest(node, perFrame))
     {
         return;
     }
-#endif
+
+    // TODO(caio): CONTINUE This is wrong. Examine in renderdoc and figure out
+    // proper way to send these draw calls
+    // I think maybe not this is wrong, but the CPU draw indirect call that's not taking the buffer offsets into account
+    uint drawBuffer = (mat.mDoubleSided == 1) ? DB_GBUFFER_OPAQUE_DOUBLE : DB_GBUFFER_OPAQUE;
+    uint drawIdx = atomicAdd(drawCounts[drawBuffer], 1);
+    IndirectDraw draw;
+    draw.mIndexCount = mesh.mIndexCount;
+    draw.mInstanceCount = 1;
+    draw.mFirstIndex = mesh.mIndexStart;
+    draw.mVertexOffset = mesh.mVertexOffset;
+    draw.mFirstInstance = 0;
+
+    uint drawBufferOffset = drawBuffer * MAX_DRAWS + drawIdx;
+    drawBuffers[drawBufferOffset] = draw;
 
     if(mat.mDoubleSided == 1)
     {
-        uint drawIdx = atomicAdd(doubleSidedOpaqueDrawCount, 1);
-        doubleSidedOpaqueDrawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
-        doubleSidedOpaqueDrawCmds[drawIdx].mInstanceCount = 1;
-        doubleSidedOpaqueDrawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
-        doubleSidedOpaqueDrawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
-        doubleSidedOpaqueDrawCmds[drawIdx].mFirstInstance = 0;
-        perDraw[drawIdx].mNodeIdOpaqueDoubleSided = idx;
+        instancesOpaqueDouble[drawIdx].mNodeId = idx;
     }
     else
     {
-        uint drawIdx = atomicAdd(opaqueDrawCount, 1);
-        opaqueDrawCmds[drawIdx].mIndexCount = mesh.mIndexCount;
-        opaqueDrawCmds[drawIdx].mInstanceCount = 1;
-        opaqueDrawCmds[drawIdx].mFirstIndex = mesh.mIndexStart;
-        opaqueDrawCmds[drawIdx].mVertexOffset = mesh.mVertexOffset;
-        opaqueDrawCmds[drawIdx].mFirstInstance = 0;
-        perDraw[drawIdx].mNodeIdOpaque = idx;
+        instancesOpaque[drawIdx].mNodeId = idx;
     }
+#endif
 }

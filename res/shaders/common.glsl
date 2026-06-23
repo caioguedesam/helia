@@ -1,4 +1,5 @@
 #include "macros.glsl"
+#include "../../src/shared_defines.hpp"
 
 struct SceneMesh
 {
@@ -34,7 +35,6 @@ struct SceneMaterial
     STRUCT_PADDING_UINT(0, 1);
 };
 
-#define MAX_CASCADES 3
 struct PerFrameUniforms
 {
     mat4 mView;
@@ -58,10 +58,9 @@ struct PerFrameUniforms
     STRUCT_PADDING_VEC4(0, 1);  // Alignment 64 bytes (mat4)
 };
 
-struct PerDrawData
+struct InstanceData
 {
-    uint mNodeIdOpaque;
-    uint mNodeIdOpaqueDoubleSided;
+    uint mNodeId;
 };
 
 struct IndirectDraw
@@ -103,60 +102,62 @@ vec3 DecodeNormal(vec2 o)
 }
 
 // Common resource sets
-// 0 -> Per Frame Resources
-DEFINE_UNIFORM_BLOCK(0, 0)
-{
-    PerFrameUniforms perFrameUniforms[2];
-};
-
-// 1 -> Scene Resources
-DEFINE_STORAGE_BLOCK(1, 0)
-{
-    IndirectDraw opaqueDrawCmds[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 1)
-{
-    IndirectDraw doubleSidedOpaqueDrawCmds[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 2)
-{
-    uint opaqueDrawCount;
-    uint doubleSidedOpaqueDrawCount;
-};
-
-DEFINE_STORAGE_BLOCK(1, 3)
-{
-    PerDrawData perDraw[];
-};
-
-DEFINE_STORAGE_BLOCK(1, 4)
+// 0 -> Persistent Resources
+DEFINE_STORAGE_BLOCK(0, 0)
 {
     SceneNode sceneNodes[];
 };
 
-DEFINE_STORAGE_BLOCK(1, 5)
+DEFINE_STORAGE_BLOCK(0, 1)
 {
     SceneMesh sceneMeshes[];
 };
 
-DEFINE_STORAGE_BLOCK(1, 6)
+DEFINE_STORAGE_BLOCK(0, 2)
 {
     SceneMaterial sceneMaterials[];
 };
 
-#define SCENE_MAX_TEXTURES 1024
-DEFINE_TEXTURE2D(1, 7) materialMaps[SCENE_MAX_TEXTURES];
-DEFINE_SAMPLER(1, 8) samplerLinear;
-DEFINE_SAMPLER(1, 9) samplerPoint;
+DEFINE_TEXTURE2D(0, 3) materialMaps[SCENE_MAX_TEXTURES];
+DEFINE_SAMPLER(0, 4) samplerLinear;
+DEFINE_SAMPLER(0, 5) samplerPoint;
 
-DEFINE_TEXTURE2D(1, 10) gbufferA;
-DEFINE_TEXTURE2D(1, 11) gbufferB;
-DEFINE_TEXTURE2D(1, 12) lightingAccum;
+DEFINE_TEXTURE2D(0, 6) gbufferA;
+DEFINE_TEXTURE2D(0, 7) gbufferB;
+DEFINE_TEXTURE2D(0, 8) lightingAccum;
 
-#define HIZ_MAX 10
-DEFINE_TEXTURE2D(1, 13)         depthBuffer;
-DEFINE_IMAGE2D(1, 14, r32f)     hiz[HIZ_MAX];
+DEFINE_TEXTURE2D(0, 9)         depthBuffer;
+DEFINE_IMAGE2D(0, 10, r32f)     hiz[HIZ_MAX];
 
-DEFINE_TEXTURE2D(1, 15) shadowMaps[MAX_CASCADES];
+DEFINE_TEXTURE2D(0, 11) shadowMaps[MAX_CASCADES];
+
+// 1 -> Per Frame Resources (each of these is double-buffered, one for each concurrent frame)
+DEFINE_UNIFORM_BLOCK(1, 0)
+{
+    PerFrameUniforms perFrame;
+};
+
+DEFINE_STORAGE_BLOCK(1, 1)
+{
+    IndirectDraw drawBuffers[]; // MAX_DRAWS * MAX_DRAW_BUFFERS
+};
+
+DEFINE_STORAGE_BLOCK(1, 2)
+{
+    uint drawCounts[];          // MAX_DRAW_BUFFERS
+};
+
+DEFINE_STORAGE_BLOCK(1, 3)
+{
+    InstanceData instancesOpaque[];
+};
+
+DEFINE_STORAGE_BLOCK(1, 4)
+{
+    InstanceData instancesOpaqueDouble[];
+};
+
+DEFINE_STORAGE_BLOCK(1, 5)
+{
+    InstanceData instancesShadow[];
+};

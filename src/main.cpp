@@ -13,8 +13,9 @@
 #include "../dw/src/render/texture.hpp"
 #include "../dw/src/render/ui.hpp"
 
-#include "scene.hpp"
-#include "renderer.hpp"
+#include "../src/shared_defines.hpp"
+#include "../src/scene.hpp"
+#include "../src/renderer.hpp"
 
 App gApp;
 AssetManager gAssetManager;
@@ -26,9 +27,6 @@ uint32 gFrame = 0;
 // Helia
 Scene gScene = {};
 SceneRenderer gSceneRenderer = {};
-
-#define APP_WIDTH 800
-#define APP_HEIGHT 600
 
 void addRenderTargets()
 {
@@ -94,7 +92,7 @@ void init()
     uint32 texCount = 0;
     String modelPath = str("../../res/models/sponza/glTF/Sponza.gltf");
     setupSceneModel(&gScene, modelPath);
-    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gScene, 
+    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gUI, &gScene, 
             getFileDir(modelPath));
 
     addRenderTargets();

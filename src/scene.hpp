@@ -2,7 +2,7 @@
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/string.hpp"
 #include "../dw/src/math/math.hpp"
-#include "../dw/src/math/volumes.hpp"
+#include "../src/shared_defines.hpp"
 
 struct SceneMesh
 {
@@ -11,11 +11,6 @@ struct SceneMesh
     uint32 mIndexCount      = 0;
 };
 
-#define SCENE_MAX_TEXTURES 1024
-#define FALLBACK_BASECOLOR_INDEX 0
-#define FALLBACK_NORMAL_INDEX 1
-#define FALLBACK_MRS_INDEX 2
-#define FALLBACK_TEXTURE_COUNT 3
 struct SceneMaterial
 {
     v4f     mBaseColor = {1,1,1,1};
@@ -50,10 +45,6 @@ struct MaterialTextureInfo
     uint32 mFormat = 0; 
 };
 
-#define SCENE_MAX_NODES 1024
-#define SCENE_MAX_MESHES SCENE_MAX_NODES
-#define SCENE_MAX_MATERIALS SCENE_MAX_NODES
-#define SCENE_MAX_DRAWS 512
 struct Scene
 {
     Arena mArena = {};
