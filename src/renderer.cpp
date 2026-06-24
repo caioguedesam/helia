@@ -54,26 +54,46 @@ m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDist
 
     // https://alextardif.com/shadowmapping.html
     // Make bounding sphere to contain all of cascade's sub-frustum
-    v3f sphereCenter = {0,0,0};
+    v3f frustumCenter = {0,0,0};
     for(int32 fc = 0; fc < 8; fc++)
     {
-        sphereCenter = sphereCenter + corners[fc];
+        frustumCenter = frustumCenter + corners[fc];
     }
-    sphereCenter = sphereCenter * (1.f/8.f);
+    frustumCenter = frustumCenter * (1.f/8.f);
 
-    float sphereRadius = 0.f;
+    float radius = 0.f;
     for(int32 fc = 0; fc < 8; fc++)
     {
-        sphereRadius = MAX(sphereRadius, magn(corners[fc] - sphereCenter));
+        radius = MAX(radius, magn(corners[fc] - frustumCenter));
+    }
+
+    v3f lightDir = pSceneRenderer->mDirLight.mDir;
+    // Texel snapping: light view/proj are changed in texel sized increments, to avoid shadow shimmering when moving camera
+    {
+        // Divide shadow map size by twice the radius (covered space in world units by cascade)
+        float texelsPerUnit = (float)SHADOW_MAP_SIZE / (radius * 2.f);
+
+        // Make a look at matrix with unit size of one texel in the shadow map
+        m4f t = scale(texelsPerUnit);
+        m4f lookAt = lookAtViewRH({0,0,0}, lightDir, {0,1,0});
+        lookAt = matMul(t, lookAt);
+        m4f invLookAt = inverse(lookAt);
+
+        // Transform frustum center to the new look at matrix, then floor to move only in unit increments (shadow map texels)
+        v4f newCenter = matMul(lookAt, to4f(frustumCenter, 1.f));
+        newCenter.x = (float)floorf(newCenter.x);
+        newCenter.y = (float)floorf(newCenter.y);
+
+        // Transform back
+        newCenter = matMul(invLookAt, newCenter);
+        frustumCenter = to3f(newCenter);
     }
 
     // Make an orthographic frustum that encompasses the entire bounding sphere
-    // TODO(caio): Texel snapping
-    v3f lightDir = pSceneRenderer->mDirLight.mDir;
-    v3f frustumCenter = sphereCenter - (lightDir * sphereRadius * 2.f);
+    v3f frustumEye = frustumCenter - (lightDir * radius * 2.f);
 
-    m4f frustumView = lookAtViewRH(frustumCenter, sphereCenter, {0,1,0});
-    m4f frustumProj = orthoRH(-sphereRadius, sphereRadius, -sphereRadius, sphereRadius, -sphereRadius * 6.f, sphereRadius * 6.f);
+    m4f frustumView = lookAtViewRH(frustumEye, frustumCenter, {0,1,0});
+    m4f frustumProj = orthoRH(-radius, radius, -radius, radius, -radius * 6.f, radius * 6.f);
 
     return matMul(frustumProj, frustumView);
 }
