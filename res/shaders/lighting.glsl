@@ -42,6 +42,46 @@ vec3 worldPositionFromDepth(float z, vec2 uv, mat4 mView, mat4 mProj)
     return worldPos.xyz;
 }
 
+uint getCascadeIndex(vec3 worldPos)
+{
+    vec4 viewPos = perFrame.mView * vec4(worldPos, 1.0);
+    float viewZ = abs(viewPos.z);
+    uint cascade = MAX_CASCADES - 1;
+    for(uint i = 0; i < MAX_CASCADES; i++)
+    {
+        if(viewZ < perFrame.mShadowCascadeDistances[i])
+        {
+            cascade = i;
+            break;
+        }
+    }
+
+    return cascade;
+}
+
+float getShadowFactor(vec3 worldPos, uint cascade)
+{
+    // This is multiplied to the final color. 1 is fully lit, 0 is fully shadowed.
+
+    vec4 lightPos = perFrame.mShadowCascadesViewProj[cascade] * vec4(worldPos, 1.0);
+    lightPos /= lightPos.w;
+    
+    float currentDepth = lightPos.z;
+
+    vec2 uv = lightPos.xy * 0.5 + 0.5;
+
+    if(uv.x < 0.0 || uv.x > 1.0
+    || uv.y < 0.0 || uv.y > 1.0)
+    {
+        return 1.0;
+    }
+
+    float shadowDepth = texture(sampler2D(shadowMaps[cascade], samplerLinear), uv).r;
+
+    float bias = 0.0005;
+    return (currentDepth + bias) >= shadowDepth ? 1.0 : 0.0;
+}
+
 // PBR Lighting uses:
 // - Cook-Torrance specular microfacet model
 // - Lambertian diffuse model
@@ -137,8 +177,13 @@ void main()
     float ambient = perFrame.mLight2.w;
     result.rgb += ambient * surfaceColor * lightColor;
 
+    // TODO(caio): Shadow cascades have sharp cutoff. Need to implement some sort of blending.
+    // This should be more apparent with soft shadows.
+    uint shadowCascade = getCascadeIndex(worldPos);
+    float shadowFactor = getShadowFactor(worldPos, shadowCascade);
+
     // Directional lighting
-    result.rgb += (Fr + Fd) * NoL * intensity * lightColor; 
+    result.rgb += (Fr + Fd) * NoL * intensity * lightColor * shadowFactor; 
 
     outColor = vec4(result.rgb, 1.0f);
 }

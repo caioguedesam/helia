@@ -51,11 +51,8 @@ struct PerFrameUniforms
     vec4 mLight1;
     vec4 mLight2;
 
-    //vec4 mCameraFrustumPlanes[6];
+    vec4 mShadowCascadeDistances;
 
-    //vec4 mShadowFrustumPlanes[MAX_CASCADES * 6];
-
-    STRUCT_PADDING_VEC4(0, 1);  // Alignment 64 bytes (mat4)
 };
 
 struct InstanceData

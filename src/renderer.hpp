@@ -41,14 +41,8 @@ struct PerFrameUniforms
     v4f mDirLight1 = {0,0,0,1};          // xyz = Direction, w = Intensity
     v4f mDirLight2 = {1,1,1,0.05f};      // rgb = Color, a = Ambient factor
 
-    v4f mPadding0[1];
+    v4f mShadowCascadeDistances = {0,0,0,0};
 };
-
-//struct PerDrawData
-//{
-//    uint32 mNodeIdOpaque = MAX_UINT32;
-//    uint32 mNodeIdDoubleSided = MAX_UINT32;
-//};
 
 struct InstanceData
 {
@@ -76,7 +70,7 @@ struct SceneRenderer
     // Render resources
     Buffer* pVBScreenQuad           = NULL;
     Buffer* pIBScreenQuad           = NULL;
-    Buffer* pVBDebug                = NULL;
+    Buffer* pVBDebug[CONCURRENT_FRAMES] = { NULL, NULL };
     VertexLayout mVLScreenQuad      = {};
     VertexLayout mVLDebug           = {};
     Buffer* pVBSceneGeometry        = NULL;
