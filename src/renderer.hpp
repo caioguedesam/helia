@@ -107,7 +107,8 @@ struct SceneRenderer
     ComputePipeline* pPipeHiZDownsample = NULL;
 
     // Shadow map pass
-    RenderTarget* pRTShadowMaps[MAX_CASCADES];
+    RenderTarget* pRTShadows[MAX_CASCADES];
+    RenderTarget* pRTShadowsDepth[MAX_CASCADES];
     Shader* pVSShadowMapPass = NULL;
     Shader* pPSShadowMapPass = NULL;
     Shader* pVSShadowMapPassDoubleSided = NULL;

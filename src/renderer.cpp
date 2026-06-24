@@ -429,17 +429,19 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
     // Shadow map cascades
     {
         RenderTargetDesc desc = {};
-        desc.mClear = {{0,0,0,0}};
         uint32 w = SHADOW_MAP_SIZE;
         uint32 h = SHADOW_MAP_SIZE;
-        desc.mFormat = FORMAT_D32_SFLOAT;
-        desc.mClear.mDepth = 0;
+        //desc.mFormat = FORMAT_D32_SFLOAT;
+        desc.mClear = {{0,0,0,0}, 0};
 
         desc.mWidth = w;
         desc.mHeight = h;
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
-            addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadowMaps[i]);
+            desc.mFormat = FORMAT_RGBA32_SFLOAT;
+            addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadows[i]);
+            desc.mFormat = FORMAT_D16_UNORM;
+            addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadowsDepth[i]);
         }
     }
 
@@ -476,10 +478,11 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         barriers[2] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
-        RenderTargetBarrier smBarriers[MAX_CASCADES];
+        RenderTargetBarrier smBarriers[MAX_CASCADES * 2];
         for(int i = 0; i < MAX_CASCADES; i++)
         {
-            smBarriers[i] = {pSceneRenderer->pRTShadowMaps[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+            smBarriers[i * 2 + 0] = {pSceneRenderer->pRTShadows[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+            smBarriers[i * 2 + 1] = {pSceneRenderer->pRTShadowsDepth[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
         }
         cmdRenderTargetBarrier(pCmd, ARR_LEN(smBarriers), smBarriers);
 
@@ -579,7 +582,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         Texture* shadowMapTextures[MAX_CASCADES];
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
-            shadowMapTextures[i] = pSceneRenderer->pRTShadowMaps[i]->pTexture;
+            shadowMapTextures[i] = pSceneRenderer->pRTShadows[i]->pTexture;
         }
 
         DescriptorSetDesc desc = {};
@@ -628,8 +631,9 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     // Shadow pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 0;
-        desc.mDepthTargetFormat = pSceneRenderer->pRTShadowMaps[0]->mDesc.mFormat;
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTShadows[0]->mDesc.mFormat;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTShadowsDepth[0]->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
         desc.pVS = pSceneRenderer->pVSShadowMapPass;
@@ -900,7 +904,8 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTSceneDepth);
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
-        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadowMaps[i]);
+        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadows[i]);
+        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadowsDepth[i]);
     }
     for(int32 i = 1; i < pSceneRenderer->mDepthHierarchyCount; i++)
     {
@@ -1305,7 +1310,7 @@ void addUIControls(SceneRenderer* pSceneRenderer)
         uiStartWindow(str("Shadow Maps"), -400, 0, 400, 0);
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
-            Texture* pTex = pSceneRenderer->pRTShadowMaps[i]->pTexture;
+            Texture* pTex = pSceneRenderer->pRTShadows[i]->pTexture;
             Sampler* pSampler = pSceneRenderer->pSamplerPoint;
             uiImage(pSceneRenderer->pUI, pTex, pSampler, 256, 256);
         }
@@ -1388,13 +1393,16 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
-            RenderTarget* pRTDepth = pSceneRenderer->pRTShadowMaps[i];
-            RenderTargetBarrier barriers[1];
-            barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+            RenderTarget* pRT = pSceneRenderer->pRTShadows[i];
+            RenderTarget* pRTDepth = pSceneRenderer->pRTShadowsDepth[i];
+            RenderTargetBarrier barriers[2];
+            barriers[0] = {pRT, getImageLayout(pRT), IMAGE_LAYOUT_COLOR_OUTPUT };
+            barriers[1] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
             cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
             RenderTargetBindDesc bindDesc = {};
-            bindDesc.mColorCount = 0;
+            bindDesc.mColorCount = 1;
+            bindDesc.mColorBindings[0] = { pRT, LOAD_OP_CLEAR, STORE_OP_STORE };
             bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_STORE };
             cmdBindRenderTargets(pCmd, bindDesc);
 
@@ -1421,8 +1429,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
             cmdUnbindRenderTargets(pCmd);
 
-            barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
-            cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+            barriers[0] = {pRT, getImageLayout(pRT), IMAGE_LAYOUT_SHADER_READ_ONLY };
+            cmdRenderTargetBarrier(pCmd, 1, barriers);
 
             char buf[256];
             String tsName = strf(buf, "Shadow Draw Pass (Cascade %d)", i);

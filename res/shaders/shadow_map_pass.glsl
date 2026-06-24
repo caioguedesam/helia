@@ -35,6 +35,8 @@ void main()
 PS_IN_NOINTERP(0) uint inNodeId;
 PS_IN(1) vec2 inUV;
 
+PS_OUT(0) vec4 outShadow;
+
 void main()
 {
     SceneNode node = sceneNodes[inNodeId];
@@ -51,5 +53,7 @@ void main()
     {
         discard;
     }
+
+    outShadow = vec4(gl_FragCoord.z, 0, 0, 1);
 }
 #endif  // PIXEL_SHADER
