@@ -304,7 +304,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             &pSceneRenderer->mCamera);
 
     DirectionalLight light = {};
-    light.mDir = {1.f, -0.5f, 0.5f};
+    light.mDir = {0.f, -1.f, 0.f};
     light.mIntensity = 1.f;
     light.mColor = {1,1,1};
     pSceneRenderer->mDirLight = light;
