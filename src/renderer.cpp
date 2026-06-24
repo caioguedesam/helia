@@ -296,7 +296,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     camDesc.mFovY = fovHtoV(fovX, aspect);
     camDesc.mAspect = aspect;
     camDesc.mNear = 0.001f;
-    camDesc.mFar = 100.f;
+    camDesc.mFar = 20.f;
     initCamera(
             {0,0,-5}, 
             {0,0,0}, 
