@@ -295,6 +295,17 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         addBuffer(pRenderer, desc, &pSceneRenderer->pUBPerFrame[i]);
     }
 
+    // Shadow constants buffer
+    for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
+    {
+        BufferDesc desc = {};
+        desc.mType = BUFFER_TYPE_UNIFORM;
+        desc.mSize = sizeof(ShadowConstants);
+        desc.mCount = 1;
+        desc.mStride = sizeof(ShadowConstants);
+        addBuffer(pRenderer, desc, &pSceneRenderer->pUBShadowConstants[i]);
+    }
+
     // Instance buffers
     for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
     {
@@ -351,6 +362,7 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
     for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
     {
         removeBuffer(pRenderer, &pSceneRenderer->pUBPerFrame[i]);
+        removeBuffer(pRenderer, &pSceneRenderer->pUBShadowConstants[i]);
         removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesOpaque[i]);
         removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesOpaqueDouble[i]);
         removeBuffer(pRenderer, &pSceneRenderer->pSBInstancesShadow[i]);
@@ -614,13 +626,14 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
         {
             DescriptorSetDesc desc = {};
-            desc.mCount = 6;
+            desc.mCount = 7;
             desc.mResources[0] = { DESCRIPTOR_UNIFORM_BUFFER, pSceneRenderer->pUBPerFrame[i], 1 };
             desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->mDrawBuffers.pDrawBuffers[i], 1 };
             desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->mDrawBuffers.pDrawCountBuffers[i], 1 };
             desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesOpaque[i], 1 };
             desc.mResources[4] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesOpaqueDouble[i], 1 };
             desc.mResources[5] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBInstancesShadow[i], 1 };
+            desc.mResources[6] = { DESCRIPTOR_UNIFORM_BUFFER, pSceneRenderer->pUBShadowConstants[i], 1 };
             addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSPerFrame[i]);
         }
     }
@@ -992,6 +1005,7 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
 
 void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
 {
+    // Per frame constants
     m4f cameraView = getView(&pSceneRenderer->mCamera);
     m4f cameraProj = getProj(&pSceneRenderer->mCamera);
     pSceneRenderer->perFrameUniforms.mView = cameraView;
@@ -1016,6 +1030,9 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
     pSceneRenderer->perFrameUniforms.mDirLight2 = to4f(light.mColor, pSceneRenderer->mAmbient);
 
     memcpy(pSceneRenderer->perFrameUniforms.mShadowCascadeDistances.mData, cascadeSplitDistances, MAX_CASCADES * sizeof(float));
+
+    // Shadow constants
+    // TODO(caio): Control shadow data here
 }
 
 void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
@@ -1027,6 +1044,12 @@ void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)
             0, 
             &pSceneRenderer->perFrameUniforms, 
             sizeof(PerFrameUniforms));
+
+    copyToBuffer(pRenderer, 
+            pSceneRenderer->pUBShadowConstants[activeFrame], 
+            0, 
+            &pSceneRenderer->shadowConstants, 
+            sizeof(ShadowConstants));
 }
 
 void debugAddVertex(SceneRenderer* pSceneRenderer, v3f pos, v3f col)
@@ -1302,6 +1325,7 @@ void addUIControls(SceneRenderer* pSceneRenderer)
     uiSliderf(str("Ambient"), &pSceneRenderer->mAmbient, 0.f, 1.f);
 
     uiSeparator(str("Shadow Settings"));
+    uiSliderf(str("Light Bleeding Reduction"), &pSceneRenderer->shadowConstants.mBleedingReduction, 0.f, 1.f);
     uiSliderf(str("Cascade Split Factor"), &pSceneRenderer->mShadowSettings.kSplitFactor, 0.f, 1.f);
     static bool showShadowMaps = false;
     uiCheckbox(str("Show Shadow Maps"), &showShadowMaps);

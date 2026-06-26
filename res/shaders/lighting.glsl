@@ -59,27 +59,89 @@ uint getCascadeIndex(vec3 worldPos)
     return cascade;
 }
 
-float getShadowFactor(vec3 worldPos, uint cascade)
+float msmGetShadowVisibility(vec4 moments, float fragmentDepth, float depthBias, float momentBias)
+{
+    // Based on MJP's Moment Shadow Mapping implementation:
+    // https://github.com/TheRealMJP/Shadows/blob/master/Shadows/MSM.hlsl
+
+    // Bias input data to avoid artifacts
+    vec4 b = mix(moments, vec4(0.5f, 0.5f, 0.5f, 0.5f), momentBias);
+    vec3 z;
+    z[0] = fragmentDepth - depthBias;
+
+    // Compute a Cholesky factorization of the Hankel matrix B storing only non-
+    // trivial entries or related products
+    float L32D22 = (-b[0] * b[1]) + b[2];
+    float D22 = (-b[0] * b[0]) + b[1];
+    float squaredDepthVariance = (-b[1] * b[1]) + b[3];
+    float D33D22 = dot(vec2(squaredDepthVariance, -L32D22), vec2(D22, L32D22));
+    float InvD22 = 1.0f / D22;
+    float L32 = L32D22 * InvD22;
+
+    // Obtain a scaled inverse image of bz = (1,z[0],z[0]*z[0])^T
+    vec3 c = vec3(1.0f, z[0], z[0] * z[0]);
+
+    // Forward substitution to solve L*c1=bz
+    c[1] -= b.x;
+    c[2] -= b.y + L32 * c[1];
+
+    // Scaling to solve D*c2=c1
+    c[1] *= InvD22;
+    c[2] *= D22 / D33D22;
+
+    // Backward substitution to solve L^T*c3=c2
+    c[1] -= L32 * c[2];
+    c[0] -= dot(c.yz, b.xy);
+
+    // Solve the quadratic equation c[0]+c[1]*z+c[2]*z^2 to obtain solutions
+    // z[1] and z[2]
+    float p = c[1] / c[2];
+    float q = c[0] / c[2];
+    float D = (p * p * 0.25f) - q;
+    float r = sqrt(D);
+    z[1] =- p * 0.5f - r;
+    z[2] =- p * 0.5f + r;
+
+    // Compute the shadow intensity by summing the appropriate weights
+    // Taking reverse Z into account as well.
+    vec4 switchVal = (z[2] >= z[0]) ? vec4(z[1], z[0], 1.0f, 1.0f) :
+                      ((z[1] >= z[0]) ? vec4(z[0], z[1], 0.0f, 1.0f) :
+                      vec4(0.0f,0.0f,0.0f,0.0f));
+    float quotient = (switchVal[0] * z[2] - b[0] * (switchVal[0] + z[2]) + b[1])/((z[2] - switchVal[1]) * (z[0] - z[1]));
+    float shadowIntensity = switchVal[2] + switchVal[3] * quotient;
+    return 1.0f - saturate(shadowIntensity);
+}
+
+float reduceLightBleeding(float v)
+{
+    float f = shadowConstants.mBleedingReduction;
+    return saturate((v - f) / (1.0 - f));
+}
+
+float getShadowVisibility(vec3 worldPos, uint cascade)
 {
     // This is multiplied to the final color. 1 is fully lit, 0 is fully shadowed.
 
+    // Getting fragment depth
     vec4 lightPos = perFrame.mShadowCascadesViewProj[cascade] * vec4(worldPos, 1.0);
     lightPos /= lightPos.w;
-    
-    float currentDepth = lightPos.z;
+    float zf = lightPos.z;
 
+    // Sample shadow map
     vec2 uv = lightPos.xy * 0.5 + 0.5;
-
     if(uv.x < 0.0 || uv.x > 1.0
     || uv.y < 0.0 || uv.y > 1.0)
     {
         return 1.0;
     }
 
-    float shadowDepth = texture(sampler2D(shadowMaps[cascade], samplerLinear), uv).r;
+    vec4 moments = texture(sampler2D(shadowMaps[cascade], samplerLinear), uv);
 
-    float bias = 0.0005;
-    return (currentDepth + bias) >= shadowDepth ? 1.0 : 0.0;
+    float result = msmGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
+
+    result = reduceLightBleeding(result);
+
+    return result;
 }
 
 // PBR Lighting uses:
@@ -180,10 +242,10 @@ void main()
     // TODO(caio): Shadow cascades have sharp cutoff. Need to implement some sort of blending.
     // This should be more apparent with soft shadows.
     uint shadowCascade = getCascadeIndex(worldPos);
-    float shadowFactor = getShadowFactor(worldPos, shadowCascade);
+    float shadowVisibility = getShadowVisibility(worldPos, shadowCascade);
 
     // Directional lighting
-    result.rgb += (Fr + Fd) * NoL * intensity * lightColor * shadowFactor; 
+    result.rgb += (Fr + Fd) * NoL * intensity * lightColor * shadowVisibility; 
 
     outColor = vec4(result.rgb, 1.0f);
 }

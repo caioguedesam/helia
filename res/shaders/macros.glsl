@@ -7,7 +7,6 @@
 #define CONCAT_(A, B) A##B
 #define CONCAT(A, B) CONCAT_(A, B)
 
-#define STRUCT_PADDING_UINT(NAME, AMOUNT) uint padding_##NAME[AMOUNT]
 #define STRUCT_PADDING_VEC4(NAME, AMOUNT) vec4 padding_##NAME[AMOUNT]
 
 #define VS_IN(N) layout(location = N) in

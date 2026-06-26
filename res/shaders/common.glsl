@@ -16,7 +16,8 @@ struct SceneNode
     uint mMeshId;
     uint mMaterialId;
 
-    STRUCT_PADDING_UINT(0, 2);
+    uint mPadding0;
+    uint mPadding1;
 };
 
 struct SceneMaterial
@@ -32,7 +33,7 @@ struct SceneMaterial
     float mAlphaCutoff;
     uint mDoubleSided;
     
-    STRUCT_PADDING_UINT(0, 1);
+    uint mPadding0;
 };
 
 struct PerFrameUniforms
@@ -53,6 +54,16 @@ struct PerFrameUniforms
 
     vec4 mShadowCascadeDistances;
 
+};
+
+struct ShadowConstants
+{
+    float mDepthBias;
+    float mMomentBias;
+    float mBleedingReduction;
+
+    float mPadding0;
+    STRUCT_PADDING_VEC4(1, 3);
 };
 
 struct InstanceData
@@ -157,4 +168,9 @@ DEFINE_STORAGE_BLOCK(1, 4)
 DEFINE_STORAGE_BLOCK(1, 5)
 {
     InstanceData instancesShadow[];
+};
+
+DEFINE_UNIFORM_BLOCK(1, 6)
+{
+    ShadowConstants shadowConstants;
 };

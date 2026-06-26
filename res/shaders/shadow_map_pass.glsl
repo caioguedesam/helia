@@ -54,6 +54,11 @@ void main()
         discard;
     }
 
-    outShadow = vec4(gl_FragCoord.z, 0, 0, 1);
+    // Storing moments 1 - 4 in shadow map
+    float z = gl_FragCoord.z;
+    float z2 = pow(z, 2);
+    float z3 = pow(z, 3);
+    float z4 = pow(z, 4);
+    outShadow = vec4(z, z2, z3, z4);
 }
 #endif  // PIXEL_SHADER

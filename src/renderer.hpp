@@ -22,6 +22,7 @@ struct DirectionalLight
 
 struct ShadowSettings
 {
+    // TODO(cguedes): Should I move this to shadow constants?
     float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
 };
 
@@ -44,6 +45,17 @@ struct PerFrameUniforms
     v4f mShadowCascadeDistances = {0,0,0,0};
 };
 
+struct ShadowConstants
+{
+    // Biases (x1000)
+    float mDepthBias = 0.f;
+    float mMomentBias = 0.003f;
+    float mBleedingReduction = 0.f;
+
+    float mPadding0;
+    v4f mPadding1[3];
+};
+
 struct InstanceData
 {
     uint32 mNodeId = MAX_UINT32;
@@ -60,6 +72,7 @@ struct SceneRenderer
 
     // Render data
     PerFrameUniforms perFrameUniforms = {};
+    ShadowConstants shadowConstants = {};
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
     ShadowSettings mShadowSettings = {};
@@ -81,6 +94,7 @@ struct SceneRenderer
     Buffer* pSBSceneMaterials       = NULL;
 
     Buffer* pUBPerFrame[CONCURRENT_FRAMES]                  = { NULL, NULL };
+    Buffer* pUBShadowConstants[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesShadow[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesOpaque[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesOpaqueDouble[CONCURRENT_FRAMES]     = { NULL, NULL };
