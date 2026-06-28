@@ -58,7 +58,7 @@ vec3 ToneMapping_Hable(vec3 v)
 void main()
 {
     vec4 result = texture(
-            sampler2D(lightingAccum, samplerPoint), inUV);
+            sampler2D(getSampledTexture(perFrame.mHandleLightingAccum), samplerPoint), inUV);
 
     result.rgb = ToneMapping_ACES(result.rgb);
     //result.rgb = ToneMapping_Hable(result.rgb);

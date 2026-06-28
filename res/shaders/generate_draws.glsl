@@ -137,7 +137,7 @@ bool occlusionTest(SceneNode node, PerFrameUniforms perFrame)
     }
 
     // Get the width/height of AABB in texels of first Hi-Z buffer.
-    ivec2 baseSize = imageSize(hiz[0]);
+    ivec2 baseSize = imageSize(getStorageTexture(perFrame.mHandleHiZ[0]));
     vec2 aabbWidth = xyMax - xyMin;
     vec2 texelSize = aabbWidth * vec2(baseSize);
 
@@ -145,14 +145,14 @@ bool occlusionTest(SceneNode node, PerFrameUniforms perFrame)
     // TODO(caio): Still get some objects being occluded when they shouldn't here.
     // Is the mip selected not the 2x2 footprint for the AABB?
     int mip = int(min(floor(log2(max(texelSize.x, texelSize.y))) + 1.0, HIZ_MAX - 1.0));
-    vec2 mipSize = vec2(imageSize(hiz[mip]));
+    vec2 mipSize = vec2(imageSize(getStorageTexture(perFrame.mHandleHiZ[mip])));
 
     vec4 box = vec4(xyMin, xyMax);
 
-    float z0 = imageLoad(hiz[mip], ivec2(mipSize * box.xy)).r;
-    float z1 = imageLoad(hiz[mip], ivec2(mipSize * box.zw)).r;
-    float z2 = imageLoad(hiz[mip], ivec2(mipSize * box.xw)).r;
-    float z3 = imageLoad(hiz[mip], ivec2(mipSize * box.zy)).r;
+    float z0 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ivec2(mipSize * box.xy)).r;
+    float z1 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ivec2(mipSize * box.zw)).r;
+    float z2 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ivec2(mipSize * box.xw)).r;
+    float z3 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ivec2(mipSize * box.zy)).r;
 
     // Get furthest occluder stored in hiz mip (reverse Z = min)
     float hizMin = min(z0, min(z1, min(z2, z3)));

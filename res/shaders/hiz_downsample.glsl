@@ -30,7 +30,7 @@ ivec2 GenerateMip(int i, ivec2 gID, ivec2 sampleCoord)
 
     int denom = int(pow(2, i));
     ivec2 mipCoord = ivec2(gID.x / denom, gID.y / denom);
-    imageStore(hiz[mip], mipCoord, vec4(z, 0, 0, 0));
+    imageStore(getStorageTexture(perFrame.mHandleHiZ[mip]), mipCoord, vec4(z, 0, 0, 0));
 
     if(i < 3)
     {
@@ -44,7 +44,7 @@ void main()
 {
     // Read 8x8 block, one texel per thread
     ivec2 gID = ivec2(gl_GlobalInvocationID.xy);
-    float z = imageLoad(hiz[baseMip], gID).r;
+    float z = imageLoad(getStorageTexture(perFrame.mHandleHiZ[baseMip]), gID).r;
 
     ivec2 tID = ivec2(gl_LocalInvocationID.xy);
     samples[tID.x][tID.y][0] = z;

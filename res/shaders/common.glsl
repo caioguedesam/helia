@@ -1,6 +1,11 @@
 #include "macros.glsl"
 #include "../../src/shared_defines.hpp"
 
+// Enabling bindless resources
+#extension GL_EXT_nonuniform_qualifier : enable
+#extension GL_EXT_scalar_block_layout : enable
+#extension GL_EXT_shader_image_load_formatted : enable
+
 struct SceneMesh
 {
     int mVertexOffset;
@@ -54,6 +59,13 @@ struct PerFrameUniforms
 
     vec4 mShadowCascadeDistances;
 
+    // Target handles
+    uint mHandleGBufferA;
+    uint mHandleGBufferB;
+    uint mHandleDepthBuffer;
+    uint mHandleLightingAccum;
+    uint mHandleShadowMaps[MAX_CASCADES];
+    uint mHandleHiZ[HIZ_MAX];
 };
 
 struct ShadowConstants
@@ -61,9 +73,6 @@ struct ShadowConstants
     float mDepthBias;
     float mMomentBias;
     float mBleedingReduction;
-
-    float mPadding0;
-    STRUCT_PADDING_VEC4(1, 3);
 };
 
 struct InstanceData
@@ -111,33 +120,34 @@ vec3 DecodeNormal(vec2 o)
 
 // Common resource sets
 // 0 -> Persistent Resources
-DEFINE_STORAGE_BLOCK(0, 0)
+
+// TODO(caio): Do this for samplers and buffers.
+// I think I can only do this with buffers on HLSL and SM6.6
+DEFINE_TEXTURE2D(0, 0) sampledTextureResources[MAX_TEXTURES];
+DEFINE_IMAGE2D(0, 1) storageTextureResources[MAX_TEXTURES];
+
+DEFINE_STORAGE_BLOCK(0, 2)
 {
     SceneNode sceneNodes[];
 };
 
-DEFINE_STORAGE_BLOCK(0, 1)
+DEFINE_STORAGE_BLOCK(0, 3)
 {
     SceneMesh sceneMeshes[];
 };
 
-DEFINE_STORAGE_BLOCK(0, 2)
+DEFINE_STORAGE_BLOCK(0, 4)
 {
     SceneMaterial sceneMaterials[];
 };
 
-DEFINE_TEXTURE2D(0, 3) materialMaps[SCENE_MAX_TEXTURES];
-DEFINE_SAMPLER(0, 4) samplerLinear;
-DEFINE_SAMPLER(0, 5) samplerPoint;
+DEFINE_SAMPLER(0, 5) samplerLinear;
+DEFINE_SAMPLER(0, 6) samplerPoint;
 
-DEFINE_TEXTURE2D(0, 6) gbufferA;
-DEFINE_TEXTURE2D(0, 7) gbufferB;
-DEFINE_TEXTURE2D(0, 8) lightingAccum;
 
-DEFINE_TEXTURE2D(0, 9)         depthBuffer;
-DEFINE_IMAGE2D(0, 10, r32f)     hiz[HIZ_MAX];
 
-DEFINE_TEXTURE2D(0, 11) shadowMaps[MAX_CASCADES];
+#define getSampledTexture(N) sampledTextureResources[N]
+#define getStorageTexture(N) storageTextureResources[N]
 
 // 1 -> Per Frame Resources (each of these is double-buffered, one for each concurrent frame)
 DEFINE_UNIFORM_BLOCK(1, 0)

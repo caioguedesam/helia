@@ -135,7 +135,7 @@ float getShadowVisibility(vec3 worldPos, uint cascade)
         return 1.0;
     }
 
-    vec4 moments = texture(sampler2D(shadowMaps[cascade], samplerLinear), uv);
+    vec4 moments = texture(sampler2D(getSampledTexture(perFrame.mHandleShadowMaps[cascade]), samplerLinear), uv);
 
     float result = msmGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
 
@@ -201,9 +201,9 @@ vec3 diffuseBRDF(vec3 surfaceColor, float metallic)
 
 void main()
 {
-    vec4 sampleA = texture(sampler2D(gbufferA, samplerLinear), inUV);   // rgb = Diffuse color, a = Metallic
-    vec4 sampleB = texture(sampler2D(gbufferB, samplerLinear), inUV);   // rg = Encoded normal, b = Roughness
-    float depth = texture(sampler2D(depthBuffer, samplerLinear), inUV).r;
+    vec4 sampleA = texture(sampler2D(getSampledTexture(perFrame.mHandleGBufferA), samplerLinear), inUV);   // rgb = Diffuse color, a = Metallic
+    vec4 sampleB = texture(sampler2D(getSampledTexture(perFrame.mHandleGBufferB), samplerLinear), inUV);   // rg = Encoded normal, b = Roughness
+    float depth = texture(sampler2D(getSampledTexture(perFrame.mHandleDepthBuffer), samplerLinear), inUV).r;
 
     // BRDF inputs
     vec3 L = normalize(-perFrame.mLight1.xyz);

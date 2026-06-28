@@ -10,6 +10,7 @@
 #include "dw/src/math/volumes.hpp"
 #include "dw/src/render/buffer.hpp"
 #include "dw/src/render/camera.hpp"
+#include "dw/src/render/resource_manager.hpp"
 #include "dw/src/render/shader.hpp"
 #include "src/draw_buffers.hpp"
 
@@ -114,6 +115,35 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     pSceneRenderer->pScene = pScene;
     pSceneRenderer->pUI = pUI;
 
+    pSceneRenderer->mTextureResourceManager = createResourceManager<Texture>(pRenderer, &pApp->mAppArena, MAX_TEXTURES);
+
+    // Bindless fallback texture
+    {
+        TextureDesc desc = {};
+        desc.mWidth = 1;
+        desc.mHeight = 1;
+        desc.mDepth = 1;
+        desc.mSamples = 1;
+        desc.mFormat = FORMAT_R32_SFLOAT;
+        desc.mMipCount = 1;
+        desc.mType = TEXTURE_TYPE_2D;
+        desc.mUsage =
+            TEXTURE_USAGE_TRANSFER_SRC |
+            TEXTURE_USAGE_TRANSFER_DST |
+            TEXTURE_USAGE_SAMPLED      |
+            TEXTURE_USAGE_STORAGE;
+
+        initTexture(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pTexSampledStorageFallback);
+
+        CommandBuffer* pCmd = getCmd(pSceneRenderer->pRenderer, true);
+        beginCmd(pCmd);
+        TextureBarrier barrier = {pSceneRenderer->pTexSampledStorageFallback, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
+        cmdTextureBarrier(pCmd, 1, &barrier);
+
+        endCmd(pCmd);
+        submitImmediateCmd(pSceneRenderer->pRenderer, pCmd);
+    }
+
     // Load textures from scene model
     {
         PROFILE_SCOPE_NAME("initSceneRenderer::Load Textures");
@@ -125,7 +155,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             char buf[256];
             MaterialTextureInfo texInfo = pScene->mTexInfos[t];
             String texPath = strf(buf, "%.*s/%.*s", STRF_ARG(rootPath), STRF_ARG(texInfo.mPath));
-            loadTexture(pAssetManager, pRenderer, texPath, (ImageFormat)texInfo.mFormat, false, &pTex);
+            loadTexture(pAssetManager, &pSceneRenderer->mTextureResourceManager, texPath, (ImageFormat)texInfo.mFormat, false, &pTex);
             pSceneRenderer->pTexMaterialMaps[t + FALLBACK_TEXTURE_COUNT] = pTex;
         }
     }
@@ -133,20 +163,29 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Load fallback textures
     {
         Texture* pTexFallbackBaseColor = NULL;
-        loadTexture(pAssetManager, pRenderer, str("../../res/textures/white.png"),
+        loadTexture(pAssetManager, &pSceneRenderer->mTextureResourceManager, str("../../res/textures/white.png"),
                 FORMAT_RGBA8_SRGB, false, &pTexFallbackBaseColor);
 
         Texture* pTexFallbackNormal = NULL;
-        loadTexture(pAssetManager, pRenderer, str("../../res/textures/flat_normal.png"),
+        loadTexture(pAssetManager, &pSceneRenderer->mTextureResourceManager, str("../../res/textures/flat_normal.png"),
                 FORMAT_RGBA8_UNORM, false, &pTexFallbackNormal);
 
         Texture* pTexFallbackMRS = NULL;
-        loadTexture(pAssetManager, pRenderer, str("../../res/textures/black.png"),
+        loadTexture(pAssetManager, &pSceneRenderer->mTextureResourceManager, str("../../res/textures/black.png"),
                 FORMAT_RGBA8_UNORM, false, &pTexFallbackMRS);
 
         pSceneRenderer->pTexMaterialMaps[FALLBACK_BASECOLOR_INDEX] = pTexFallbackBaseColor;
         pSceneRenderer->pTexMaterialMaps[FALLBACK_NORMAL_INDEX] = pTexFallbackNormal;
         pSceneRenderer->pTexMaterialMaps[FALLBACK_MRS_INDEX] = pTexFallbackMRS;
+    }
+
+    // Substituting relative material texture indices with actual bindless handles in materials
+    for(uint32 i = 0; i < pScene->mMaterialCount; i++)
+    {
+        SceneMaterial* pMat = &pScene->mMaterials[i];
+        pMat->mBaseColorTexture = pSceneRenderer->pTexMaterialMaps[pMat->mBaseColorTexture]->mHandle;
+        pMat->mNormalTexture = pSceneRenderer->pTexMaterialMaps[pMat->mNormalTexture]->mHandle;
+        pMat->mMetallicRoughnessTexture = pSceneRenderer->pTexMaterialMaps[pMat->mMetallicRoughnessTexture]->mHandle;
     }
 
     // Geometry vertex layout
@@ -193,14 +232,6 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
             0, 2, 1,
         };
 
-    // // Draw call buffers
-    // // Passes:
-    // // - Opaque objects
-    // // - Double-sided opaque objects
-    // Buffer* pDBDrawCmdsOpaque = NULL;
-    // Buffer* pDBDrawCmdsOpaqueDoubleSided = NULL;
-    // Buffer* pDBDrawCmdCount = NULL;
-    // Buffer* pSBPerDraw = NULL;
         BufferDesc vbDesc = {};
         vbDesc.mType = BUFFER_TYPE_VERTEX;
         vbDesc.mSize = ARR_LEN(vertexData) * sizeof(float);
@@ -354,8 +385,9 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer)
 
     for(uint32 t = 0; t < pSceneRenderer->mMaterialMapCount; t++)
     {
-        removeTexture(pRenderer, &pSceneRenderer->pTexMaterialMaps[t]);
+        destroyTexture(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pTexMaterialMaps[t]);
     }
+    destroyTexture(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pTexSampledStorageFallback);
 
     removeSampler(pRenderer, &pSceneRenderer->pSamplerLinear);
     removeSampler(pRenderer, &pSceneRenderer->pSamplerPoint);
@@ -390,7 +422,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
-        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTAccum);
+        initRenderTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTAccum);
     }
 
     // Scene depth targets
@@ -404,7 +436,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
         desc.mWidth = w;
         desc.mHeight = h;
-        addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTSceneDepth);
+        initDepthTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTSceneDepth);
         pSceneRenderer->pDepthHierarchyTextures[0] = pSceneRenderer->pRTSceneDepth->pTexture;
         pSceneRenderer->mDepthHierarchyCount = 1;
 
@@ -427,7 +459,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
                 TEXTURE_USAGE_SAMPLED      |
                 TEXTURE_USAGE_STORAGE;
 
-            addTexture(pSceneRenderer->pRenderer, hizDesc, &pSceneRenderer->pDepthHierarchyTextures[i]);
+            initTexture(&pSceneRenderer->mTextureResourceManager, hizDesc, &pSceneRenderer->pDepthHierarchyTextures[i]);
 
             pSceneRenderer->mDepthHierarchyCount++;
 
@@ -451,9 +483,9 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
             desc.mFormat = FORMAT_RGBA32_SFLOAT;
-            addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadows[i]);
+            initRenderTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTShadows[i]);
             desc.mFormat = FORMAT_D16_UNORM;
-            addDepthTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTShadowsDepth[i]);
+            initDepthTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTShadowsDepth[i]);
         }
     }
 
@@ -464,9 +496,9 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
-        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferA);
+        initRenderTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTGBufferA);
         desc.mFormat = FORMAT_A2RGB10_UNORM;
-        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTGBufferB);
+        initRenderTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTGBufferB);
     }
 
     // Final present RT
@@ -476,7 +508,16 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
-        addRenderTarget(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pRTPresent);
+        initRenderTarget(&pSceneRenderer->mTextureResourceManager, desc, &pSceneRenderer->pRTPresent);
+
+        CommandBuffer* pCmd = getCmd(pSceneRenderer->pRenderer, true);
+        beginCmd(pCmd);
+
+        RenderTargetBarrier barrier = {pSceneRenderer->pRTPresent, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+        cmdRenderTargetBarrier(pCmd, 1, &barrier);
+
+        endCmd(pCmd);
+        submitImmediateCmd(pSceneRenderer->pRenderer, pCmd);
     }
 
     // Transitioning render targets so they can be bound to descriptor sets
@@ -585,38 +626,33 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
     // Scene global descriptor set
     if(!pSceneRenderer->pDSPersistent)
     {
-        Texture* storageDepthTextures[HIZ_MAX];
-        for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
-        {
-            storageDepthTextures[i] = pSceneRenderer->pDepthHierarchyTextures[i];
-        }
-
-        Texture* shadowMapTextures[MAX_CASCADES];
-        for(int32 i = 0; i < MAX_CASCADES; i++)
-        {
-            shadowMapTextures[i] = pSceneRenderer->pRTShadows[i]->pTexture;
-        }
-
         DescriptorSetDesc desc = {};
-        desc.mCount = 12;
-        // TODO(caio): Buffer arrays?
-        desc.mResources[0] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
-        desc.mResources[1] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
-        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMaterials, 1 };
-        desc.mResources[3] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pTexMaterialMaps, 
-            pSceneRenderer->mMaterialMapCount, 
-            SCENE_MAX_TEXTURES };
-        desc.mResources[4] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerLinear, 1 };
-        desc.mResources[5] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
-        desc.mResources[6] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferA->pTexture, 1 };
-        desc.mResources[7] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTGBufferB->pTexture, 1 };
-        desc.mResources[8] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTAccum->pTexture, 1 };
-        desc.mResources[9] = { DESCRIPTOR_TEXTURE, pSceneRenderer->pRTSceneDepth->pTexture, 1 };
-        desc.mResources[10] = { DESCRIPTOR_STORAGE_IMAGE, storageDepthTextures,
-            pSceneRenderer->mDepthHierarchyCount,
-            HIZ_MAX};
-        desc.mResources[11] = { DESCRIPTOR_TEXTURE, shadowMapTextures,
-            MAX_CASCADES, MAX_CASCADES};
+        desc.mCount = 7;
+
+        Texture* sampledTextures[MAX_TEXTURES];
+        Texture* storageTextures[MAX_TEXTURES];
+        getSampledTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, sampledTextures);
+        getStorageTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, storageTextures);
+
+        desc.mResources[0] = 
+        { 
+            DESCRIPTOR_TEXTURE, 
+            sampledTextures,
+            MAX_TEXTURES,
+            MAX_TEXTURES,
+        };
+        desc.mResources[1] = 
+        { 
+            DESCRIPTOR_STORAGE_IMAGE, 
+            storageTextures,
+            MAX_TEXTURES,
+            MAX_TEXTURES,
+        };
+        desc.mResources[2] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneNodes, 1 };
+        desc.mResources[3] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMeshes, 1 };
+        desc.mResources[4] = { DESCRIPTOR_STORAGE_BUFFER, pSceneRenderer->pSBSceneMaterials, 1 };
+        desc.mResources[5] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerLinear, 1 };
+        desc.mResources[6] = { DESCRIPTOR_SAMPLER, pSceneRenderer->pSamplerPoint, 1 };
         addDescriptorSet(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pDSPersistent);
     }
 
@@ -910,19 +946,19 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
 void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
 {
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTPresent);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTAccum);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferA);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTGBufferB);
-    removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTSceneDepth);
+    destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTPresent);
+    destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTAccum);
+    destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTGBufferA);
+    destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTGBufferB);
+    destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTSceneDepth);
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
-        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadows[i]);
-        removeRenderTarget(pSceneRenderer->pRenderer, &pSceneRenderer->pRTShadowsDepth[i]);
+        destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTShadows[i]);
+        destroyRenderTarget(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pRTShadowsDepth[i]);
     }
     for(int32 i = 1; i < pSceneRenderer->mDepthHierarchyCount; i++)
     {
-        removeTexture(pSceneRenderer->pRenderer, &pSceneRenderer->pDepthHierarchyTextures[i]);
+        destroyTexture(&pSceneRenderer->mTextureResourceManager, &pSceneRenderer->pDepthHierarchyTextures[i]);
     }
 }
 
@@ -1033,6 +1069,20 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
 
     // Shadow constants
     // TODO(caio): Control shadow data here
+
+    // Target handles
+    pSceneRenderer->perFrameUniforms.mHandleGBufferA = pSceneRenderer->pRTGBufferA->pTexture->mHandle;
+    pSceneRenderer->perFrameUniforms.mHandleGBufferB = pSceneRenderer->pRTGBufferB->pTexture->mHandle;
+    pSceneRenderer->perFrameUniforms.mHandleDepthBuffer = pSceneRenderer->pRTSceneDepth->pTexture->mHandle;
+    pSceneRenderer->perFrameUniforms.mHandleLightingAccum = pSceneRenderer->pRTAccum->pTexture->mHandle;
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        pSceneRenderer->perFrameUniforms.mHandleShadowMaps[i] = pSceneRenderer->pRTShadows[i]->pTexture->mHandle;
+    }
+    for(int32 i = 0; i < HIZ_MAX; i++)
+    {
+        pSceneRenderer->perFrameUniforms.mHandleHiZ[i] = pSceneRenderer->pDepthHierarchyTextures[i]->mHandle;
+    }
 }
 
 void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer)

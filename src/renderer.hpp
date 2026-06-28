@@ -3,6 +3,7 @@
 #include "../dw/src/asset/asset.hpp"
 #include "../dw/src/render/buffer.hpp"
 #include "../dw/src/render/shader.hpp"
+#include "../dw/src/render/resource_manager.hpp"
 #include "../dw/src/render/render.hpp"
 #include "../dw/src/render/camera.hpp"
 #include "../dw/src/render/timings.hpp"
@@ -29,7 +30,7 @@ struct ShadowSettings
 void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances);
 m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade);
 
-struct PerFrameUniforms
+struct alignas(64) PerFrameUniforms
 {
     m4f mView = {};
     m4f mProj = {};
@@ -43,17 +44,22 @@ struct PerFrameUniforms
     v4f mDirLight2 = {1,1,1,0.05f};      // rgb = Color, a = Ambient factor
 
     v4f mShadowCascadeDistances = {0,0,0,0};
+
+    // Target Handles
+    HND mHandleGBufferA = HND_INVALID;
+    HND mHandleGBufferB = HND_INVALID;
+    HND mHandleDepthBuffer = HND_INVALID;
+    HND mHandleLightingAccum = HND_INVALID;
+    HND mHandleShadowMaps[MAX_CASCADES];
+    HND mHandleHiZ[HIZ_MAX];
 };
 
-struct ShadowConstants
+struct alignas(64) ShadowConstants
 {
     // Biases (x1000)
     float mDepthBias = 0.f;
     float mMomentBias = 0.003f;
     float mBleedingReduction = 0.f;
-
-    float mPadding0;
-    v4f mPadding1[3];
 };
 
 struct InstanceData
@@ -81,6 +87,9 @@ struct SceneRenderer
     Array<float> mDebugVerts;
 
     // Render resources
+    ResourceManager<Texture> mTextureResourceManager = {};
+    Texture* pTexSampledStorageFallback = NULL;
+
     Buffer* pVBScreenQuad           = NULL;
     Buffer* pIBScreenQuad           = NULL;
     Buffer* pVBDebug[CONCURRENT_FRAMES] = { NULL, NULL };
@@ -132,7 +141,6 @@ struct SceneRenderer
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth = NULL;
-    //RenderTarget* pRTSceneDepth[HIZ_MAX];
     Texture* pDepthHierarchyTextures[HIZ_MAX];
     uint32 mDepthHierarchyCount = 0;
     Shader* pVSDepthPrePass = NULL;

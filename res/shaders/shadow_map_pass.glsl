@@ -46,7 +46,7 @@ void main()
     // There's probably a better way to separate these materials to make this shader
     // more minimal.
     vec4 baseColor = texture(
-            sampler2D(materialMaps[material.mBaseColorTexId], samplerLinear),
+            sampler2D(getSampledTexture(material.mBaseColorTexId), samplerLinear),
             inUV);
     float mask = step(material.mAlphaCutoff, baseColor.a);
     if(mask < 1.0)

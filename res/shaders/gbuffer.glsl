@@ -95,7 +95,7 @@ void main()
 
     // Diffuse color
     vec4 baseColor = texture(
-            sampler2D(materialMaps[material.mBaseColorTexId], samplerLinear),
+            sampler2D(getSampledTexture(material.mBaseColorTexId), samplerLinear),
             inUV);
     float mask = step(material.mAlphaCutoff, baseColor.a);
     if(mask < 1.0)
@@ -125,13 +125,13 @@ void main()
     vec3 V = normalize(camPos - inWorldPos);
     mat3 TBN = getTBN(vertexNormal, -V, inUV);
 #endif
-    vec3 normalMap = texture(sampler2D(materialMaps[material.mNormalTexId], samplerLinear), inUV).rgb;
+    vec3 normalMap = texture(sampler2D(getSampledTexture(material.mNormalTexId), samplerLinear), inUV).rgb;
     normalMap = normalize(normalMap * 2.0f - 1.0f);
     vec3 normal = normalize(TBN * normalMap);
 
     // Metallic + Roughness
     vec4 metallicRoughness = texture(
-            sampler2D(materialMaps[material.mMetallicRoughnessTexId], samplerLinear),
+            sampler2D(getSampledTexture(material.mMetallicRoughnessTexId), samplerLinear),
             inUV);
 
     // Writing outputs to GBuffer
