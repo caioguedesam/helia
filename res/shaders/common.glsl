@@ -144,8 +144,6 @@ DEFINE_STORAGE_BLOCK(0, 4)
 DEFINE_SAMPLER(0, 5) samplerLinear;
 DEFINE_SAMPLER(0, 6) samplerPoint;
 
-
-
 #define getSampledTexture(N) sampledTextureResources[N]
 #define getStorageTexture(N) storageTextureResources[N]
 

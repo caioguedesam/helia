@@ -553,14 +553,14 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
 void addSceneShaders(SceneRenderer* pSceneRenderer)
 {
-    String generateDrawsShaderPath = str("../../res/shaders/generate_draws.glsl");
-    String hiZDownsampleShaderPath = str("../../res/shaders/hiz_downsample.glsl");
-    String depthPrepassShaderPath = str("../../res/shaders/depth_prepass.glsl");
-    String shadowPassShaderPath = str("../../res/shaders/shadow_map_pass.glsl");
-    String gbufferShaderPath = str("../../res/shaders/gbuffer.glsl");
-    String lightingShaderPath = str("../../res/shaders/lighting.glsl");
-    String debugShaderPath = str("../../res/shaders/debug.glsl");
-    String tonemappingShaderPath = str("../../res/shaders/tone_mapping.glsl");
+    String generateDrawsShaderPath = str("../../res/shaders/generate_draws.hlsl");
+    String hiZDownsampleShaderPath = str("../../res/shaders/hiz_downsample.hlsl");
+    String depthPrepassShaderPath = str("../../res/shaders/depth_prepass.hlsl");
+    String shadowPassShaderPath = str("../../res/shaders/shadow_map_pass.hlsl");
+    String gbufferShaderPath = str("../../res/shaders/gbuffer.hlsl");
+    String lightingShaderPath = str("../../res/shaders/lighting.hlsl");
+    String debugShaderPath = str("../../res/shaders/debug.hlsl");
+    String tonemappingShaderPath = str("../../res/shaders/tone_mapping.hlsl");
     String shadowMapDefines[] =
     {
         str("SHADOW_MAP"),
@@ -632,7 +632,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         Texture* sampledTextures[MAX_TEXTURES];
         Texture* storageTextures[MAX_TEXTURES];
         getSampledTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, sampledTextures);
-        getStorageTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, storageTextures);
+        getStorageTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, FORMAT_R32_SFLOAT, pSceneRenderer->pTexSampledStorageFallback, storageTextures);
 
         desc.mResources[0] = 
         { 
@@ -700,11 +700,10 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
         // Constants:
-        // - Active frame (uint32)
         // - Current cascade
         desc.mConstantBlockCount = 1;
         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
 
         if(!pSceneRenderer->pPipeShadowMapPass)
         {
@@ -742,11 +741,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
         desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
-        // Constants:
-        // - Active frame (uint32)
-        desc.mConstantBlockCount = 1;
-        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+        desc.mConstantBlockCount = 0;
 
         if(!pSceneRenderer->pPipeDepthPrePass)
         {
@@ -788,11 +783,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
         desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
-        // Constants:
-        // - Active frame (uint32)
-        desc.mConstantBlockCount = 1;
-        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32);
+        desc.mConstantBlockCount = 0;
 
         if(!pSceneRenderer->pPipeGBuffer)
         {
@@ -820,10 +811,9 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
         // Constants:
         // - Total node count (uint32)
-        // - Active frame (uint32)
         desc.mConstantBlockCount = 1;
         desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_COMP;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+        desc.mConstantBlocks[0].mSize = sizeof(uint32);
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeGenerateDraws);
 
@@ -875,11 +865,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
         desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
-        // Constants:
-        // - Active frame (uint32)
-        desc.mConstantBlockCount = 1;
-        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+        desc.mConstantBlockCount = 0;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeLighting);
     }
@@ -907,11 +893,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.pDescriptorSets[0] = pSceneRenderer->pDSPersistent;
         desc.pDescriptorSets[1] = pSceneRenderer->pDSPerFrame[0];
 
-        // Constants:
-        // - Active frame (uint32)
-        desc.mConstantBlockCount = 1;
-        desc.mConstantBlocks[0].mShaderTypes = SHADER_TYPE_VERT | SHADER_TYPE_FRAG;
-        desc.mConstantBlocks[0].mSize = sizeof(uint32) * 2;
+        desc.mConstantBlockCount = 0;
 
         addPipeline(pSceneRenderer->pRenderer, desc, &pSceneRenderer->pPipeDebug);
     }
@@ -1046,6 +1028,9 @@ void updatePerFrameUniforms(SceneRenderer* pSceneRenderer)
     m4f cameraProj = getProj(&pSceneRenderer->mCamera);
     pSceneRenderer->perFrameUniforms.mView = cameraView;
     pSceneRenderer->perFrameUniforms.mProj = cameraProj;
+    pSceneRenderer->perFrameUniforms.mViewProj = matMul(cameraProj, cameraView);
+    pSceneRenderer->perFrameUniforms.mInvView = inverse(cameraView);
+    pSceneRenderer->perFrameUniforms.mInvProj = inverse(cameraProj);
     pSceneRenderer->perFrameUniforms.mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
     if(!pSceneRenderer->mFreezeMainCam)
     {
@@ -1441,10 +1426,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
         cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
-        uint32 drawBufferConstants[2];
+        uint32 drawBufferConstants[1];
         drawBufferConstants[0] = pSceneRenderer->pScene->mNodeCount;
-        drawBufferConstants[1] = activeFrame;
-
         cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(drawBufferConstants), &drawBufferConstants[0]);
 
         cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
@@ -1492,9 +1475,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
             cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
             cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
 
-            uint32 constants[2];
-            constants[0] = pRenderer->mActiveFrame;
-            constants[1] = i;
+            uint32 constants[1];
+            constants[0] = i;
             cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants);
 
             cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_SHADOW_0 + i, activeFrame);
@@ -1588,9 +1570,8 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindDescriptorSet(pCmd, pPipeline, pDSPersistent, 0);
         cmdBindDescriptorSet(pCmd, pPipeline, pDSPerFrame, 1);
 
-        uint32 constants[2];
+        uint32 constants[1];
         constants[0] = pSceneRenderer->pScene->mNodeCount;
-        constants[1] = pRenderer->mActiveFrame;
         cmdSetConstants(pCmd, pPipeline, 0, ARR_SIZE(constants), &constants[0]);
 
         cmdDispatch(pCmd, SCENE_MAX_NODES / 32, 1, 1);
@@ -1630,10 +1611,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
-
-        uint32 constants[1];
-        constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
 
         // Opaque
         cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE, activeFrame);
@@ -1679,10 +1656,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
-
-        uint32 constants[1];
-        constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
 
         // Opaque
         cmdDrawIndirectBuffer(pCmd, &pSceneRenderer->mDrawBuffers, DB_GBUFFER_OPAQUE, activeFrame);
@@ -1730,10 +1703,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
 
-        uint32 constants[1];
-        constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
-
         cmdDrawIndexed(pCmd, 
                 3, 1, 0, 0);
 
@@ -1764,10 +1733,6 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
         cmdSetScissor(pCmd, pRTAccum);
 
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBDebug[activeFrame]);
-
-        uint32 constants[1];
-        constants[0] = pRenderer->mActiveFrame;
-        cmdSetConstants(pCmd, pPipeline, 0, sizeof(uint32), &constants);
 
         cmdDraw(pCmd, pSceneRenderer->mDebugVerts.mCount / 6, 1);
 

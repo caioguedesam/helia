@@ -121,19 +121,12 @@ if not exist "./build/%BUILD%" (
     mkdir "./build/%BUILD%"
 )
 
-rem Building dependencies (always in release mode)
-rem TODO_DW: Just shaderc adds 80MB to dependency lib size. Maybe this should be changed.
-rem set DEPS=user32.lib gdi32.lib %VULKAN_SDK_PATH%/Lib/vulkan-1.lib %VULKAN_SDK_PATH%/Lib/shaderc_combined.lib
-rem if %BUILD_DEPENDENCIES%==1 (
-rem     echo Building %DEPFILE%.lib...
-rem     %CC% %CC_FLAGS% -Ofast -Wno-nullability-completeness -c %DEFINES% %DEFINES_P% ./src/dependencies.cpp -o %DEPFILE:/=\%.obj
-rem     lib /OUT:%DEPFILE:/=\%.lib %DEPFILE:/=\%.obj %DEPS% >nul
-rem     del "%DEPFILE:/=\%.obj"
-rem )
-
 rem Building app
 echo Building %OUTFILE% [%BUILD%]...
 %CC% %CC_FLAGS% %CC_FLAGS_O% %DEFINES% %DEFINES_P% ./src/main.cpp %L_FLAGS% %L_FLAGS_DW% -o %OUTFILE%.exe
+
+rem Moving dlls to executable folder
+copy /Y ".\dw\build\%BUILD%\*.dll" ".\build\%BUILD%" >nul
 
 rem Get end time:
 for /F "tokens=1-4 delims=:.," %%a in ("%time%") do (

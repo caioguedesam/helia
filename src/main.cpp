@@ -95,6 +95,7 @@ void init()
     initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gUI, &gScene, 
             getFileDir(modelPath));
 
+    initShaderCompiler();
     addRenderTargets();
     addShaders();
     addDescriptors();
@@ -109,6 +110,7 @@ void shutdown()
     removeDescriptors();
     removeShaders();
     removeRenderTargets();
+    destroyShaderCompiler();
 
     destroySceneRenderer(&gSceneRenderer);
     destroyScene(&gScene);

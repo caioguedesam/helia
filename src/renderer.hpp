@@ -36,6 +36,9 @@ struct alignas(64) PerFrameUniforms
     m4f mProj = {};
     m4f mMainView = {};
     m4f mMainProj = {};
+    m4f mViewProj = {};
+    m4f mInvView = {};
+    m4f mInvProj = {};
 
     m4f mShadowCascadesViewProj[MAX_CASCADES];
 
