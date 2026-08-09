@@ -11,10 +11,17 @@ void FrustumPlanesFromViewProj(float4x4 vp, out float4 planes[6])
     // (Mv instead of vM).
 
     // Extract rows from column-major matrix
-    float4 r0 = float4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
-    float4 r1 = float4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
-    float4 r2 = float4(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
-    float4 r3 = float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
+    // HLSL accesses are M[row][column]
+    float4 r0 = vp[0];
+    float4 r1 = vp[1];
+    float4 r2 = vp[2];
+    float4 r3 = vp[3];
+
+    // Old GLSL code (accesses are M[column][row]
+    //float4 r0 = float4(vp[0][0], vp[1][0], vp[2][0], vp[3][0]);
+    //float4 r1 = float4(vp[0][1], vp[1][1], vp[2][1], vp[3][1]);
+    //float4 r2 = float4(vp[0][2], vp[1][2], vp[2][2], vp[3][2]);
+    //float4 r3 = float4(vp[0][3], vp[1][3], vp[2][3], vp[3][3]);
 
     // Plane: dot(n, p) + d >= 0
     planes[0] = r3 + r0; // Left

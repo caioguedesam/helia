@@ -632,7 +632,7 @@ void addSceneDescriptors(SceneRenderer* pSceneRenderer)
         Texture* sampledTextures[MAX_TEXTURES];
         Texture* storageTextures[MAX_TEXTURES];
         getSampledTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, sampledTextures);
-        getStorageTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, FORMAT_R32_SFLOAT, pSceneRenderer->pTexSampledStorageFallback, storageTextures);
+        getStorageTextureResources(&pSceneRenderer->mTextureResourceManager, MAX_TEXTURES, pSceneRenderer->pTexSampledStorageFallback, storageTextures);
 
         desc.mResources[0] = 
         { 

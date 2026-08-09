@@ -3,6 +3,8 @@
 #define dot_c(A, B) max(dot((A), (B)), 0.0)
 #define FLT_MAX 3.402823466e+38F
 
+#pragma pack_matrix(column_major)
+
 #include "../../src/shared_defines.hpp"
 
 struct SceneMesh

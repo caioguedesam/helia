@@ -46,11 +46,8 @@ void cmdPrepareDrawBuffers(CommandBuffer* pCmd, DrawBuffers* pBuffers, uint32 ac
 {
     ASSERT(activeFrame < CONCURRENT_FRAMES);
 
-    for(int32 i = 0; i < pBuffers->mCount; i++)
-    {
-        cmdFillBuffer(pCmd, pBuffers->pDrawBuffers[activeFrame], 0);
-        cmdFillBuffer(pCmd, pBuffers->pDrawCountBuffers[activeFrame], 0);
-    }
+    cmdFillBuffer(pCmd, pBuffers->pDrawBuffers[activeFrame], 0);
+    cmdFillBuffer(pCmd, pBuffers->pDrawCountBuffers[activeFrame], 0);
 
     Barrier barrier = {};
     barrier.mSrcStage = PIPELINE_STAGE_TRANSFER;
