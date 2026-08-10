@@ -116,7 +116,7 @@ PSOut PSMain(PSIn psIn,
 #endif
 
 #if VERTEX_TANGENTS
-    float3x3 TBN = float3x3(vertexTangent, psIn.bitangent, vertexNormal);
+    float3x3 TBN = transpose(float3x3(vertexTangent, psIn.bitangent, vertexNormal));
 #else
     float3 camPos = perFrame.mCamWorldPos.xyz;
     float3 V = normalize(camPos - psIn.worldPos);

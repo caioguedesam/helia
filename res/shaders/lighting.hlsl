@@ -209,7 +209,7 @@ float4 PSMain(PSIn psIn) : SV_Target
     float3 L = normalize(-perFrame.mLight1.xyz);
     float3 N = DecodeNormal(sampleB.xy);
 
-    float3 worldPos = WorldPositionFromDepth(depth, uv, perFrame.mView, perFrame.mProj);
+    float3 worldPos = WorldPositionFromDepth(depth, uv, perFrame.mInvView, perFrame.mInvProj);
     float3 camPos = perFrame.mCamWorldPos.xyz;
 
     float3 V = normalize(camPos - worldPos);
