@@ -147,19 +147,19 @@ void setupSceneModel(Scene* pScene, String modelPath)
         if(pPBR->base_color_texture.texture)
         {
             mat.mBaseColorTexture = cgltf_texture_index(pGltfData, pPBR->base_color_texture.texture) + FALLBACK_TEXTURE_COUNT;
-            uint32 texInfoId = texInfoByPath[str(pPBR->base_color_texture.texture->image->uri)];
+            uint32 texInfoId = texInfoByPath.getValue(str(pPBR->base_color_texture.texture->image->uri));
             pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_SRGB;
         }
         if(pPBR->metallic_roughness_texture.texture)
         {
             mat.mMetallicRoughnessTexture = cgltf_texture_index(pGltfData, pPBR->metallic_roughness_texture.texture) + FALLBACK_TEXTURE_COUNT;
-            uint32 texInfoId = texInfoByPath[str(pPBR->metallic_roughness_texture.texture->image->uri)];
+            uint32 texInfoId = texInfoByPath.getValue(str(pPBR->metallic_roughness_texture.texture->image->uri));
             pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
         }
         if(pMat->normal_texture.texture)
         {
             mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture) + FALLBACK_TEXTURE_COUNT;
-            uint32 texInfoId = texInfoByPath[str(pMat->normal_texture.texture->image->uri)];
+            uint32 texInfoId = texInfoByPath.getValue(str(pMat->normal_texture.texture->image->uri));
             pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
         }
         if(pMat->alpha_mode != cgltf_alpha_mode_opaque)
@@ -293,7 +293,7 @@ void setupSceneModel(Scene* pScene, String modelPath)
         for(cgltf_size p = 0; p < pNode->mesh->primitives_count; p++)
         {
             cgltf_primitive* pPrimitive = &pNode->mesh->primitives[p];
-            uint32 meshIdx = sceneMeshByPrimitive[pPrimitive];
+            uint32 meshIdx = sceneMeshByPrimitive.getValue(pPrimitive);
 
             uint32 materialIdx = MAX_UINT32;
             ASSERT(pPrimitive->material);

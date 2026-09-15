@@ -1,8 +1,18 @@
-#include "common.hlsl"
+#include "common.slang"
 
-PUSH_CONSTANTS_BEGIN()
-uint nodeCount;
-PUSH_CONSTANTS_END()
+struct Params
+{
+    uint nodeCount;
+    uint pFrame;
+    uint pDrawBuffers;
+    uint pDrawCounts;
+    uint pInstancesShadow;
+    uint pInstancesOpaque;
+    uint pInstancesOpaqueDoubleSided;
+    uint pNodes;
+    uint pMeshes;
+    uint pMaterials;
+};
 
 void FrustumPlanesFromViewProj(float4x4 vp, out float4 planes[6])
 {
@@ -40,12 +50,12 @@ void FrustumPlanesFromViewProj(float4x4 vp, out float4 planes[6])
 }
 
 // Frustum culling
-bool CameraFrustumTest(SceneNode node, PerFrameUniforms perFrame)
+bool CameraFrustumTest(SceneNode node, PerFrame frame)
 {
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
     float4 planes[6];
-    FrustumPlanesFromViewProj(mul(perFrame.mMainProj, perFrame.mMainView), planes);
+    FrustumPlanesFromViewProj(mul(frame.mMainProj, frame.mMainView), planes);
 
     for(int i = 0; i < 6; i++)
     {
@@ -66,7 +76,7 @@ bool CameraFrustumTest(SceneNode node, PerFrameUniforms perFrame)
     return true;
 }
 
-bool ShadowCascadeFrustumTest(SceneNode node, PerFrameUniforms perFrame, uint cascade)
+bool ShadowCascadeFrustumTest(SceneNode node, PerFrame frame, uint cascade)
 {
     if(cascade >= MAX_CASCADES)
     {
@@ -74,7 +84,7 @@ bool ShadowCascadeFrustumTest(SceneNode node, PerFrameUniforms perFrame, uint ca
     }
 
     float4 planes[6];
-    FrustumPlanesFromViewProj(perFrame.mShadowCascadesViewProj[cascade], planes);
+    FrustumPlanesFromViewProj(frame.mShadowCascadesViewProj[cascade], planes);
 
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
@@ -101,7 +111,7 @@ bool IsPointInNDC(float3 p)
     return !(p.x < -1.0 || p.x > 1.0 || p.y < -1.0 || p.y > 1.0 || p.z < 0.0 || p.z > 1.0);
 }
 
-bool OcclusionTest(SceneNode node, PerFrameUniforms perFrame)
+bool OcclusionTest(SceneNode node, PerFrame frame)
 {
     // Project 8 aabb corners to Z buffer UV space
     float4 p[8];
@@ -122,7 +132,7 @@ bool OcclusionTest(SceneNode node, PerFrameUniforms perFrame)
     {
         // Convert to clip space
         // TODO(caio): Change this to premultiplied view proj
-        p[i] = mul(mul(perFrame.mMainProj, perFrame.mMainView), p[i]);
+        p[i] = mul(mul(frame.mMainProj, frame.mMainView), p[i]);
         p[i] = p[i] / p[i].w;
 
         // Early out: if any AABB corner is out of bounds, don't test.
@@ -141,7 +151,8 @@ bool OcclusionTest(SceneNode node, PerFrameUniforms perFrame)
 
     // Get the width/height of AABB in texels of first Hi-Z buffer.
     uint baseWidth, baseHeight;
-    GetStorageTextureR32F(perFrame.mHandleHiZ[0]).GetDimensions(baseWidth, baseHeight);
+    RWTexture2D<float> hizBase = GetRWTexture2DFloat(frame.mHandleHiZ[0]);
+    hizBase.GetDimensions(baseWidth, baseHeight);
     float2 aabbWidth = xyMax - xyMin;
     float2 texelSize = aabbWidth * float2(baseWidth, baseHeight);
 
@@ -150,15 +161,16 @@ bool OcclusionTest(SceneNode node, PerFrameUniforms perFrame)
     // Is the mip selected not the 2x2 footprint for the AABB?
     int mip = int(min(floor(log2(max(texelSize.x, texelSize.y))) + 1.0, HIZ_MAX - 1.0));
     uint mipWidth, mipHeight;
-    GetStorageTextureR32F(perFrame.mHandleHiZ[mip]).GetDimensions(mipWidth, mipHeight);
+    RWTexture2D<float> hizMip = GetRWTexture2DFloat(frame.mHandleHiZ[mip]);
+    hizMip.GetDimensions(mipWidth, mipHeight);
     float2 mipSize = float2(mipWidth, mipHeight);
 
     float4 box = float4(xyMin, xyMax);
 
-    float z0 = GetStorageTextureR32F(perFrame.mHandleHiZ[mip])[int2(mipSize * box.xy)].r;
-    float z1 = GetStorageTextureR32F(perFrame.mHandleHiZ[mip])[int2(mipSize * box.zw)].r;
-    float z2 = GetStorageTextureR32F(perFrame.mHandleHiZ[mip])[int2(mipSize * box.xw)].r;
-    float z3 = GetStorageTextureR32F(perFrame.mHandleHiZ[mip])[int2(mipSize * box.zy)].r;
+    float z0 = hizMip[int2(mipSize * box.xy)].r;
+    float z1 = hizMip[int2(mipSize * box.zw)].r;
+    float z2 = hizMip[int2(mipSize * box.xw)].r;
+    float z3 = hizMip[int2(mipSize * box.zy)].r;
 
     //-float z0 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ifloat2(mipSize * box.xy)).r;
     //-float z1 = imageLoad(getStorageTexture(perFrame.mHandleHiZ[mip]), ifloat2(mipSize * box.zw)).r;
@@ -173,28 +185,30 @@ bool OcclusionTest(SceneNode node, PerFrameUniforms perFrame)
     return zMax >= (hizMin - bias);
 }
 
+CS_ENTRY
 [numthreads(32, 1, 1)]
-void CSMain(uint3 id : SV_DispatchThreadID)
+void CSMain(uint3 id : SV_DispatchThreadID, uniform Params params)
 {
     uint idx = id.x;
-    if(idx >= pushConstants.nodeCount)
+    if(idx >= params.nodeCount)
     {
         return;
     }
 
-    SceneNode node = sceneNodes[idx];
-    SceneMesh mesh = sceneMeshes[node.mMeshId];
-    SceneMaterial mat = sceneMaterials[node.mMaterialId];
+    PerFrame frame          = GetBufferConstants(PerFrame, params.pFrame);
+    SceneNode node          = GetBuffer(SceneNode, params.pNodes)[idx];
+    SceneMesh mesh          = GetBuffer(SceneMesh, params.pMeshes)[node.mMeshId];
+    SceneMaterial material  = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
 
 #if SHADOW_MAP
     // Shadow pass
     for(int i = 0; i < MAX_CASCADES; i++)
     {
         uint drawBuffer = DB_SHADOW_0 + i;
-        if(ShadowCascadeFrustumTest(node, perFrame, i))
+        if(ShadowCascadeFrustumTest(node, frame, i))
         {
             uint drawIdx;
-            InterlockedAdd(drawCounts[drawBuffer], 1, drawIdx);
+            InterlockedAdd(GetBuffer(uint, params.pDrawCounts)[drawBuffer], 1, drawIdx);
             
             IndirectDraw draw;
             draw.mIndexCount = mesh.mIndexCount;
@@ -204,27 +218,27 @@ void CSMain(uint3 id : SV_DispatchThreadID)
             draw.mFirstInstance = 0;
 
             uint drawBufferOffset = drawBuffer * MAX_DRAWS + drawIdx;
-            drawBuffers[drawBufferOffset] = draw;
+            GetBuffer(IndirectDraw, params.pDrawBuffers)[drawBufferOffset] = draw;
 
-            instancesShadow[(i * MAX_DRAWS) + drawIdx].mNodeId = idx;
+            GetBuffer(InstanceData, params.pInstancesShadow)[(i * MAX_DRAWS) + drawIdx].mNodeId = idx;
         }
     }
 #else
     // Frustum culling
-    if(!CameraFrustumTest(node, perFrame))
+    if(!CameraFrustumTest(node, frame))
     {
         return;
     }
     
     // Occlusion culling with Hi-Z
-    if(!OcclusionTest(node, perFrame))
+    if(!OcclusionTest(node, frame))
     {
         return;
     }
 
-    uint drawBuffer = (mat.mDoubleSided == 1) ? DB_GBUFFER_OPAQUE_DOUBLE : DB_GBUFFER_OPAQUE;
+    uint drawBuffer = (material.mDoubleSided == 1) ? DB_GBUFFER_OPAQUE_DOUBLE : DB_GBUFFER_OPAQUE;
     uint drawIdx;
-    InterlockedAdd(drawCounts[drawBuffer], 1, drawIdx);
+    InterlockedAdd(GetBuffer(uint, params.pDrawCounts)[drawBuffer], 1, drawIdx);
     IndirectDraw draw;
     draw.mIndexCount = mesh.mIndexCount;
     draw.mInstanceCount = 1;
@@ -233,15 +247,15 @@ void CSMain(uint3 id : SV_DispatchThreadID)
     draw.mFirstInstance = 0;
 
     uint drawBufferOffset = drawBuffer * MAX_DRAWS + drawIdx;
-    drawBuffers[drawBufferOffset] = draw;
+    GetBuffer(IndirectDraw, params.pDrawBuffers)[drawBufferOffset] = draw;
 
-    if(mat.mDoubleSided == 1)
+    if(material.mDoubleSided == 1)
     {
-        instancesOpaqueDouble[drawIdx].mNodeId = idx;
+        GetBuffer(InstanceData, params.pInstancesOpaqueDoubleSided)[drawIdx].mNodeId = idx;
     }
     else
     {
-        instancesOpaque[drawIdx].mNodeId = idx;
+        GetBuffer(InstanceData, params.pInstancesOpaque)[drawIdx].mNodeId = idx;
     }
 #endif
 }

@@ -1,10 +1,11 @@
 #include "../src/draw_buffers.hpp"
 #include "dw/src/render/buffer.hpp"
 #include "dw/src/render/render.hpp"
+#include "dw/src/render/resource_manager.hpp"
 
-void initDrawBuffers(Renderer* pRenderer, DrawBuffers* pBuffers)
+void initDrawBuffers(ResourceManager* pResMan, DrawBuffers* pBuffers)
 {
-    ASSERT(pRenderer && pBuffers);
+    ASSERT(pResMan && pBuffers);
 
     *pBuffers = {};
     pBuffers->mCount = DB_COUNT;
@@ -16,7 +17,7 @@ void initDrawBuffers(Renderer* pRenderer, DrawBuffers* pBuffers)
     desc.mStride = sizeof(IndirectDraw);
     for(int32 f = 0; f < CONCURRENT_FRAMES; f++)
     {
-        addBuffer(pRenderer, desc, &pBuffers->pDrawBuffers[f]);
+        initBuffer(pResMan, desc, &pBuffers->pDrawBuffers[f]);
     }
 
     desc.mType = BUFFER_TYPE_INDIRECT;
@@ -25,18 +26,18 @@ void initDrawBuffers(Renderer* pRenderer, DrawBuffers* pBuffers)
     desc.mStride = sizeof(uint32);
     for(int32 f = 0; f < CONCURRENT_FRAMES; f++)
     {
-        addBuffer(pRenderer, desc, &pBuffers->pDrawCountBuffers[f]);
+        initBuffer(pResMan, desc, &pBuffers->pDrawCountBuffers[f]);
     }
 }
 
-void destroyDrawBuffers(Renderer* pRenderer, DrawBuffers* pBuffers)
+void destroyDrawBuffers(ResourceManager* pResMan, DrawBuffers* pBuffers)
 {
-    ASSERT(pRenderer && pBuffers);
+    ASSERT(pResMan && pBuffers);
 
     for(int32 f = 0; f < CONCURRENT_FRAMES; f++)
     {
-        removeBuffer(pRenderer, &pBuffers->pDrawBuffers[f]);
-        removeBuffer(pRenderer, &pBuffers->pDrawCountBuffers[f]);
+        destroyBuffer(pResMan, &pBuffers->pDrawBuffers[f]);
+        destroyBuffer(pResMan, &pBuffers->pDrawCountBuffers[f]);
     }
 
     *pBuffers = {};

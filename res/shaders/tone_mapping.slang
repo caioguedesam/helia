@@ -1,4 +1,10 @@
-#include "common.hlsl"
+#include "common.slang"
+
+struct Params
+{
+    uint pFrame;
+    uint hdrBuffer;
+};
 
 struct VSIn
 {
@@ -44,6 +50,7 @@ float3 ToneMapping_Hable(float3 v)
     return curr * white_scale;
 }
 
+VS_ENTRY
 PSIn VSMain(VSIn vsIn)
 {
     PSIn output;
@@ -53,9 +60,13 @@ PSIn VSMain(VSIn vsIn)
     return output;
 }
 
-float4 PSMain(PSIn psIn) : SV_Target
+PS_ENTRY
+float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
-    float4 result = GetSampledTexture(perFrame.mHandleLightingAccum).Sample(samplerPoint, psIn.uv);
+    PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
+    Texture2D<float4> hdrBuffer = GetTexture2DFloat4(params.hdrBuffer);
+    SamplerState samplerPoint = GetSamplerPoint();
+    float4 result = hdrBuffer.Sample(samplerPoint, psIn.uv);
 
     result.rgb = ToneMapping_ACES(result.rgb);
     //result.rgb = ToneMapping_Hable(result.rgb);

@@ -1,4 +1,13 @@
-#include "common.hlsl"
+#include "common.slang"
+
+struct Params
+{
+    uint pFrame;
+    uint pInstancesOpaque;
+    uint pInstancesOpaqueDoubleSided;
+    uint pNodes;
+    uint pMaterials;
+};
 
 // Normal mapping can opt in to precomputed tangents. Useful for checking if model has proper tangents.
 #define VERTEX_TANGENTS 1
@@ -50,23 +59,26 @@ float3x3 GetTBN(float3 N, float3 p, float2 uv)
     return float3x3(T, B, N);
 }
 
+VS_ENTRY
 PSIn VSMain(VSIn vsIn,
-          BUILTIN_DRAW_ID uint drawId : TEXCOORD15)
+          uint drawId : SV_DrawIndex,
+          uniform Params params)
 {
     PSIn result;
 
     result.uv = vsIn.uv;
+    PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
 
 #if DOUBLE_SIDED
-    InstanceData instanceData = instancesOpaqueDouble[drawId];
+    InstanceData instanceData = GetBuffer(InstanceData, params.pInstancesOpaqueDoubleSided)[drawId];
 #else
-    InstanceData instanceData = instancesOpaque[drawId];
+    InstanceData instanceData = GetBuffer(InstanceData, params.pInstancesOpaque)[drawId];
 #endif
     result.nodeId = instanceData.mNodeId;
 
-    SceneNode node = sceneNodes[result.nodeId];
+    SceneNode node = GetBuffer(SceneNode, params.pNodes)[result.nodeId];
     float4 worldPos = mul(node.mTransform, float4(vsIn.pos, 1.0f));
-    result.pos = mul(perFrame.mViewProj, worldPos);
+    result.pos = mul(frame.mViewProj, worldPos);
 
     // TODO(caio): Readd inverse here but precalculate instead of computing on shader.
     // Currently without doing transpose inverse this breaks for non-uniform scaling.
@@ -83,17 +95,26 @@ PSIn VSMain(VSIn vsIn,
     return result;
 }
 
+PS_ENTRY
 PSOut PSMain(PSIn psIn,
-            bool isFrontFace : SV_IsFrontFace)
+            bool isFrontFace : SV_IsFrontFace,
+            uniform Params params)
 {
     PSOut output;
 
-    SceneNode node = sceneNodes[psIn.nodeId];
-    SceneMaterial material = sceneMaterials[node.mMaterialId];
+    PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
+    SamplerState samplerLinear = GetSamplerLinear();
+
+    SceneNode node = GetBuffer(SceneNode, params.pNodes)[psIn.nodeId];
+    SceneMaterial material = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
+
+    Texture2D<float4> baseColorMap          = GetTexture2DFloat4(material.mBaseColorTexId);
+    Texture2D<float4> normalMap             = GetTexture2DFloat4(material.mNormalTexId);
+    Texture2D<float4> metallicRoughnessMap  = GetTexture2DFloat4(material.mMetallicRoughnessTexId);
 
     // Diffuse color
     float2 uv = psIn.uv;
-    float4 baseColor = GetSampledTexture(material.mBaseColorTexId).Sample(samplerLinear, uv);
+    float4 baseColor = baseColorMap.Sample(samplerLinear, uv);
     float mask = step(material.mAlphaCutoff, baseColor.a);
     if(mask < 1.0)
     {
@@ -118,16 +139,16 @@ PSOut PSMain(PSIn psIn,
 #if VERTEX_TANGENTS
     float3x3 TBN = transpose(float3x3(vertexTangent, psIn.bitangent, vertexNormal));
 #else
-    float3 camPos = perFrame.mCamWorldPos.xyz;
+    float3 camPos = frame.mCamWorldPos.xyz;
     float3 V = normalize(camPos - psIn.worldPos);
     float3x3 TBN = GetTBN(vertexNormal, -V, uv);
 #endif
-    float3 normalMap = GetSampledTexture(material.mNormalTexId).Sample(samplerLinear, uv).rgb;
-    normalMap = normalize(normalMap * 2.0f - 1.0f);
-    float3 normal = normalize(mul(TBN, normalMap));
+    float3 normal = normalMap.Sample(samplerLinear, uv).rgb;
+    normal = normalize(normal * 2.0f - 1.0f);
+    normal = normalize(mul(TBN, normal));
 
     // Metallic + Roughness
-    float4 metallicRoughness = GetSampledTexture(material.mMetallicRoughnessTexId).Sample(samplerLinear, uv);
+    float4 metallicRoughness = metallicRoughnessMap.Sample(samplerLinear, uv);
 
     // Writing outputs to GBuffer
     output.gbufferA = float4(baseColor.rgb * material.mBaseColor.rgb,

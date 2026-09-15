@@ -30,7 +30,7 @@ struct ShadowSettings
 void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances);
 m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade);
 
-struct alignas(64) PerFrameUniforms
+struct PerFrame
 {
     m4f mView = {};
     m4f mProj = {};
@@ -49,21 +49,23 @@ struct alignas(64) PerFrameUniforms
     v4f mShadowCascadeDistances = {0,0,0,0};
 
     // Target Handles
-    HND mHandleGBufferA = HND_INVALID;
-    HND mHandleGBufferB = HND_INVALID;
-    HND mHandleDepthBuffer = HND_INVALID;
-    HND mHandleLightingAccum = HND_INVALID;
     HND mHandleShadowMaps[MAX_CASCADES];
     HND mHandleHiZ[HIZ_MAX];
-};
 
-struct alignas(64) ShadowConstants
+    uint32 mPadding0[3];
+};
+STATIC_ASSERT(IS_ALIGNED(sizeof(PerFrame), BUFFER_ALIGN));
+
+struct ShadowConstants
 {
     // Biases (x1000)
     float mDepthBias = 0.f;
     float mMomentBias = 0.003f;
     float mBleedingReduction = 0.f;
+
+    uint32 mPadding0;
 };
+STATIC_ASSERT(IS_ALIGNED(sizeof(ShadowConstants), BUFFER_ALIGN));
 
 struct InstanceData
 {
@@ -80,7 +82,7 @@ struct SceneRenderer
     UIState* pUI = NULL;
 
     // Render data
-    PerFrameUniforms perFrameUniforms = {};
+    PerFrame perFrameData = {};
     ShadowConstants shadowConstants = {};
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
@@ -90,7 +92,7 @@ struct SceneRenderer
     Array<float> mDebugVerts;
 
     // Render resources
-    ResourceManager<Texture> mTextureResourceManager = {};
+    ResourceManager mResMan = {};
     Texture* pTexSampledStorageFallback = NULL;
 
     Buffer* pVBScreenQuad           = NULL;
@@ -105,8 +107,8 @@ struct SceneRenderer
     Buffer* pSBSceneMeshes          = NULL;
     Buffer* pSBSceneMaterials       = NULL;
 
-    Buffer* pUBPerFrame[CONCURRENT_FRAMES]                  = { NULL, NULL };
-    Buffer* pUBShadowConstants[CONCURRENT_FRAMES]           = { NULL, NULL };
+    Buffer* pCBPerFrame[CONCURRENT_FRAMES]                  = { NULL, NULL };
+    Buffer* pCBShadowConstants[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesShadow[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesOpaque[CONCURRENT_FRAMES]           = { NULL, NULL };
     Buffer* pSBInstancesOpaqueDouble[CONCURRENT_FRAMES]     = { NULL, NULL };
@@ -117,10 +119,6 @@ struct SceneRenderer
     Sampler* pSamplerPoint = NULL;
     
     DrawBuffers mDrawBuffers = {};
-
-    // Descriptor sets
-    DescriptorSet* pDSPersistent = NULL;
-    DescriptorSet* pDSPerFrame[CONCURRENT_FRAMES] = {NULL, NULL};
 
     // Draw call buffer pass
     Shader* pCSGenerateDraws = NULL;
@@ -190,18 +188,16 @@ void destroySceneRenderer(SceneRenderer* pSceneRenderer);
 
 void addSceneRenderTargets(SceneRenderer* pSceneRenderer);
 void addSceneShaders(SceneRenderer* pSceneRenderer);
-void addSceneDescriptors(SceneRenderer* pSceneRenderer);
+void addSceneResources(SceneRenderer* pSceneRenderer);
 void addScenePipelines(SceneRenderer* pSceneRenderer);
-void addSceneRenderResources(SceneRenderer* pSceneRenderer);
 
 void removeSceneRenderTargets(SceneRenderer* pSceneRenderer);
 void removeSceneShaders(SceneRenderer* pSceneRenderer);
-void removeSceneDescriptors(SceneRenderer* pSceneRenderer);
+void removeSceneResources(SceneRenderer* pSceneRenderer);
 void removeScenePipelines(SceneRenderer* pSceneRenderer);
-void removeSceneRenderResources(SceneRenderer* pSceneRenderer);
 
-void updatePerFrameUniforms(SceneRenderer* pSceneRenderer);
-void uploadPerFrameUniforms(SceneRenderer* pSceneRenderer);
+void updatePerFrameData(SceneRenderer* pSceneRenderer);
+void uploadPerFrameData(SceneRenderer* pSceneRenderer);
 
 void debugAddVertex(SceneRenderer* pSceneRenderer, v3f pos, v3f col);
 void debugAddTri(SceneRenderer* pSceneRenderer, v3f p0, v3f p1, v3f p2, v3f col);
@@ -218,5 +214,23 @@ void debugGeometryEnd(SceneRenderer* pSceneRenderer);
 void freezeMainCamera(SceneRenderer* pSceneRenderer, bool freeze);
 
 void addUIControls(SceneRenderer* pSceneRenderer);
+
+// Render passes
+enum DrawCallIssuePass
+{
+    DRAW_CALL_ISSUE_SHADOWS,
+    DRAW_CALL_ISSUE_OPAQUE,
+};
+
+void passIssueDrawCalls(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, DrawCallIssuePass type, uint32 frame);
+void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passTonemapping(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passUI(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passSwapChainCopy(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 
 void renderScene(SceneRenderer* pSceneRenderer, uint32 frame);

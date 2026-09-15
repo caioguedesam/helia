@@ -48,14 +48,14 @@ void removeShaders()
     removeSceneShaders(&gSceneRenderer);
 }
 
-void addDescriptors()
+void addResources()
 {
-    addSceneDescriptors(&gSceneRenderer);
+    addSceneResources(&gSceneRenderer);
 }
 
-void removeDescriptors()
+void removeResources()
 {
-    removeSceneDescriptors(&gSceneRenderer);
+    removeSceneResources(&gSceneRenderer);
 }
 
 void addPipelines()
@@ -98,7 +98,7 @@ void init()
     initShaderCompiler();
     addRenderTargets();
     addShaders();
-    addDescriptors();
+    addResources();
     addPipelines();
 }
 
@@ -107,7 +107,7 @@ void shutdown()
     waitForCommands(&gRenderer);
 
     removePipelines();
-    removeDescriptors();
+    removeResources();
     removeShaders();
     removeRenderTargets();
     destroyShaderCompiler();
@@ -163,7 +163,7 @@ void update()
 
     updateCamera(&gSceneRenderer.mCamera, gApp.mDt);
 
-    updatePerFrameUniforms(&gSceneRenderer);
+    updatePerFrameData(&gSceneRenderer);
 }
 
 void render()
@@ -183,13 +183,13 @@ void processLoadRequests(App* pApp)
     if(pApp->mLoadRequests & LOAD_REQUEST_RESIZE)
     {
         removePipelines();
-        removeDescriptors();
+        removeResources();
         removeRenderTargets();
         destroySwapChain(&gRenderer, &gRenderer.mSwapChain);
 
         initSwapChain(&gRenderer, &gRenderer.mSwapChain);
         addRenderTargets();
-        addDescriptors();
+        addResources();
         addPipelines();
 
         gSceneRenderer.mCamera.mDesc.mAspect = getAspectRatio(&gApp);
@@ -200,11 +200,11 @@ void processLoadRequests(App* pApp)
     {
         LOG("Reloading shaders...");
         removePipelines();
-        removeDescriptors();
+        removeResources();
         removeShaders();
 
         addShaders();
-        addDescriptors();
+        addResources();
         addPipelines();
         removeLoadRequest(&gApp, LOAD_REQUEST_SHADER);
     }

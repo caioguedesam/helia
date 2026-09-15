@@ -27,6 +27,9 @@
 #define HIZ_MAX 10
 #define SHADOW_MAP_SIZE 2048
 #define MAX_TEXTURES 1024
+// TODO(caio): Move this somewhere else when revising ResourceDescriptorHeap API
+#define BUFFER_ALIGN 16
+#define MAX_BUFFERS 1024
 
 // App defines
 #define APP_WIDTH 800

@@ -1,16 +1,18 @@
-#include "common.hlsl"
+#include "common.slang"
 
-PUSH_CONSTANTS_BEGIN()
-uint baseMip;
-uint mipCount;
-PUSH_CONSTANTS_END()
+struct Params
+{
+    uint pFrame;
+    uint baseMip;
+    uint mipCount;
+};
 
 groupshared float samples[8][8][3];
 
-int2 GenerateMip(int i, int2 gID, int2 sampleCoord)
+int2 GenerateMip(Params params, PerFrame frame, int i, int2 gID, int2 sampleCoord)
 {
-    int mip = int(pushConstants.baseMip) + i;
-    if(mip >= HIZ_MAX || i > pushConstants.mipCount) return int2(0,0);
+    int mip = int(params.baseMip) + i;
+    if(mip >= HIZ_MAX || i > params.mipCount) return int2(0,0);
     int prevSample = i - 1;
 
     float z0 = samples[sampleCoord.x][sampleCoord.y][prevSample];
@@ -26,7 +28,8 @@ int2 GenerateMip(int i, int2 gID, int2 sampleCoord)
 
     int denom = int(pow(2, i));
     int2 mipCoord = int2(gID.x / denom, gID.y / denom);
-    GetStorageTextureR32F(perFrame.mHandleHiZ[mip])[mipCoord] = z;
+    RWTexture2D<float> hizMip = GetRWTexture2DFloat(frame.mHandleHiZ[mip]);
+    hizMip[mipCoord] = z;
 
     if(i < 3)
     {
@@ -36,13 +39,17 @@ int2 GenerateMip(int i, int2 gID, int2 sampleCoord)
     return sampleCoord;
 }
 
+CS_ENTRY
 [numthreads(8,8,1)]
 void CSMain(uint3 dispatchId : SV_DispatchThreadID,
-            uint3 groupId : SV_GroupThreadID)
+            uint3 groupId : SV_GroupThreadID,
+            uniform Params params)
 {
+    PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
     // Read 8x8 block, one texel per thread
     int2 gID = int2(dispatchId.xy);
-    float z = GetStorageTextureR32F(perFrame.mHandleHiZ[pushConstants.baseMip])[gID].r;
+    RWTexture2D<float> hizMip = GetRWTexture2DFloat(frame.mHandleHiZ[params.baseMip]);
+    float z = hizMip[gID].r;
 
     int2 tID = int2(groupId.xy);
     samples[tID.x][tID.y][0] = z;
@@ -52,16 +59,16 @@ void CSMain(uint3 dispatchId : SV_DispatchThreadID,
     // Fill block for mip base + 1 (4x4)
     int2 sampleCoord = tID;
     if(tID.x % 2 == 0 && tID.y % 2 == 0)
-        sampleCoord = GenerateMip(1, gID, sampleCoord); 
+        sampleCoord = GenerateMip(params, frame, 1, gID, sampleCoord); 
     GroupMemoryBarrierWithGroupSync();
 
     // Fill block for mip base + 2 (2x2)
     if(tID.x % 4 == 0 && tID.y % 4 == 0)
-        sampleCoord = GenerateMip(2, gID, sampleCoord); 
+        sampleCoord = GenerateMip(params, frame, 2, gID, sampleCoord); 
     GroupMemoryBarrierWithGroupSync();
 
     // Fill block for mip base + 3 (1x1)
     if(tID.x % 8 == 0 && tID.y % 8 == 0)
-        sampleCoord = GenerateMip(3, gID, sampleCoord); 
+        sampleCoord = GenerateMip(params, frame, 3, gID, sampleCoord); 
 
 }

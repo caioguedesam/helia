@@ -1,4 +1,13 @@
-#include "common.hlsl"
+#include "common.slang"
+
+struct Params
+{
+    uint pFrame;
+    uint pShadowConstants;
+    uint gbufferA;
+    uint gbufferB;
+    uint depthBuffer;
+};
 
 struct VSIn
 {
@@ -29,14 +38,14 @@ float3 WorldPositionFromDepth(float z, float2 uv, float4x4 mInvView, float4x4 mI
 
 // =================================
 // Shadows
-uint GetCascadeIndex(float3 worldPos)
+uint GetCascadeIndex(PerFrame frame, float3 worldPos)
 {
-    float4 viewPos = mul(perFrame.mView, float4(worldPos, 1.0));
+    float4 viewPos = mul(frame.mView, float4(worldPos, 1.0));
     float viewZ = abs(viewPos.z);
     uint cascade = MAX_CASCADES - 1;
     for(uint i = 0; i < MAX_CASCADES; i++)
     {
-        if(viewZ < perFrame.mShadowCascadeDistances[i])
+        if(viewZ < frame.mShadowCascadeDistances[i])
         {
             cascade = i;
             break;
@@ -99,18 +108,17 @@ float MSMGetShadowVisibility(float4 moments, float fragmentDepth, float depthBia
     return 1.0f - saturate(shadowIntensity);
 }
 
-float ReduceLightBleeding(float v)
+float ReduceLightBleeding(ShadowConstants shadowConstants, float v)
 {
     float f = shadowConstants.mBleedingReduction;
     return saturate((v - f) / (1.0 - f));
 }
 
-float GetShadowVisibility(float3 worldPos, uint cascade)
+float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float3 worldPos, uint cascade)
 {
     // This is multiplied to the final color. 1 is fully lit, 0 is fully shadowed.
-
     // Getting fragment depth
-    float4 lightPos = mul(perFrame.mShadowCascadesViewProj[cascade], float4(worldPos, 1.0));
+    float4 lightPos = mul(frame.mShadowCascadesViewProj[cascade], float4(worldPos, 1.0));
     lightPos /= lightPos.w;
     float zf = lightPos.z;
 
@@ -122,11 +130,12 @@ float GetShadowVisibility(float3 worldPos, uint cascade)
         return 1.0;
     }
 
-    float4 moments = GetSampledTexture(perFrame.mHandleShadowMaps[cascade]).Sample(samplerLinear, uv);
+    Texture2D<float4> shadowMap = GetTexture2DFloat4(frame.mHandleShadowMaps[cascade]);
+    float4 moments = shadowMap.Sample(GetSamplerLinear(), uv);
 
     float result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
 
-    result = ReduceLightBleeding(result);
+    result = ReduceLightBleeding(shadowConstants, result);
 
     return result;
 }
@@ -189,6 +198,7 @@ float3 DiffuseBRDF(float3 surfaceColor, float metallic)
     return Fd_Lambert() * diffuseColor;
 }
 
+VS_ENTRY
 PSIn VSMain(VSIn vsIn)
 {
     PSIn output;
@@ -198,19 +208,27 @@ PSIn VSMain(VSIn vsIn)
     return output;
 }
 
-float4 PSMain(PSIn psIn) : SV_Target
+PS_ENTRY
+float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
+    PerFrame frame                  = GetBufferConstants(PerFrame, params.pFrame);
+    ShadowConstants shadowConstants = GetBufferConstants(ShadowConstants, params.pShadowConstants);
+    SamplerState samplerLinear      = GetSamplerLinear();
+    Texture2D<float4> gbufferA      = GetTexture2DFloat4(params.gbufferA);
+    Texture2D<float4> gbufferB      = GetTexture2DFloat4(params.gbufferB);
+    Texture2D<float4> depthBuffer   = GetTexture2DFloat4(params.depthBuffer);
+
     float2 uv = psIn.uv;
-    float4 sampleA = GetSampledTexture(perFrame.mHandleGBufferA).Sample(samplerLinear, uv);   // rgb = Diffuse color, a = Metallic
-    float4 sampleB = GetSampledTexture(perFrame.mHandleGBufferB).Sample(samplerLinear, uv);   // rg = Encoded normal, b = Roughness
-    float depth = GetSampledTexture(perFrame.mHandleDepthBuffer).Sample(samplerLinear, uv).r;
+    float4 sampleA = gbufferA.Sample(samplerLinear, uv);   // rgb = Diffuse color, a = Metallic
+    float4 sampleB = gbufferB.Sample(samplerLinear, uv);   // rg = Encoded normal, b = Roughness
+    float depth = depthBuffer.Sample(samplerLinear, uv).r;
 
     // BRDF inputs
-    float3 L = normalize(-perFrame.mLight1.xyz);
+    float3 L = normalize(-frame.mLight1.xyz);
     float3 N = DecodeNormal(sampleB.xy);
 
-    float3 worldPos = WorldPositionFromDepth(depth, uv, perFrame.mInvView, perFrame.mInvProj);
-    float3 camPos = perFrame.mCamWorldPos.xyz;
+    float3 worldPos = WorldPositionFromDepth(depth, uv, frame.mInvView, frame.mInvProj);
+    float3 camPos = frame.mCamWorldPos.xyz;
 
     float3 V = normalize(camPos - worldPos);
     float3 H = normalize(V + L);
@@ -231,18 +249,18 @@ float4 PSMain(PSIn psIn) : SV_Target
     // Diffuse BRDF
     float3 Fd = DiffuseBRDF(surfaceColor.rgb, metallic);
 
-    float intensity = perFrame.mLight1.w;
-    float3 lightColor = perFrame.mLight2.rgb;
+    float intensity = frame.mLight1.w;
+    float3 lightColor = frame.mLight2.rgb;
     float4 result = float4(0.0f, 0.0f, 0.0f, 1.0f);
 
     // Ambient lighting
-    float ambient = perFrame.mLight2.w;
+    float ambient = frame.mLight2.w;
     result.rgb += ambient * surfaceColor * lightColor;
 
     // TODO(caio): Shadow cascades have sharp cutoff. Need to implement some sort of blending.
     // This should be more apparent with soft shadows.
-    uint shadowCascade = GetCascadeIndex(worldPos);
-    float shadowVisibility = GetShadowVisibility(worldPos, shadowCascade);
+    uint shadowCascade = GetCascadeIndex(frame, worldPos);
+    float shadowVisibility = GetShadowVisibility(frame, shadowConstants, worldPos, shadowCascade);
 
     // Directional lighting
     result.rgb += (Fr + Fd) * NoL * intensity * lightColor * shadowVisibility; 

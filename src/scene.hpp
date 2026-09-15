@@ -1,4 +1,5 @@
 #pragma once
+#include "../dw/src/core/debug.hpp"
 #include "../dw/src/core/memory.hpp"
 #include "../dw/src/core/string.hpp"
 #include "../dw/src/math/math.hpp"
@@ -9,7 +10,10 @@ struct SceneMesh
     int32 mVertexOffset     = 0;
     uint32 mIndexOffset     = 0;
     uint32 mIndexCount      = 0;
+
+    uint32 mPadding0;
 };
+STATIC_ASSERT(IS_ALIGNED(sizeof(SceneMesh), BUFFER_ALIGN));
 
 struct SceneMaterial
 {
@@ -25,8 +29,9 @@ struct SceneMaterial
     float   mAlphaCutoff = 0.f;
     uint32  mDoubleSided = 1;
 
-    uint32  mPadding0[1];
+    uint32  mPadding0;
 };
+STATIC_ASSERT(IS_ALIGNED(sizeof(SceneMaterial), BUFFER_ALIGN));
 
 struct SceneNode
 {
@@ -38,6 +43,7 @@ struct SceneNode
 
     uint32 mPadding0[2];
 };
+STATIC_ASSERT(IS_ALIGNED(sizeof(SceneNode), BUFFER_ALIGN));
 
 struct MaterialTextureInfo
 {
