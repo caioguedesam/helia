@@ -162,7 +162,7 @@ float V_SmithGGXCorrelated(float NoV, float NoL, float a)
     float a2 = a * a;
     float GGXL = NoV * sqrt((-NoL * a2 + NoL) * NoL + a2);
     float GGXV = NoL * sqrt((-NoV * a2 + NoV) * NoV + a2);
-    return 0.5f / (GGXV + GGXL);
+    return 0.5f / max(GGXV + GGXL, 0.0001);
 }
 
 // Specular BRDF Fresnel term (Schlick)
@@ -174,28 +174,6 @@ float3 F_F0(float3 color, float metallic)
 float3 F_Schlick(float u, float3 f0)
 {
     return f0 + (float3(1.0, 1.0, 1.0) - f0) * pow(1.0 - u, 5.0);
-}
-
-float3 SpecularBRDF(float NoH, float NoV, float NoL, float LoH, float3 surfaceColor,
-        float roughness, float metallic)
-{
-    float D = D_GGX(NoH, roughness);
-    float V = V_SmithGGXCorrelated(NoV, NoL, roughness);
-    float3 F = F_Schlick(LoH, F_F0(surfaceColor, metallic));
-
-    return (D * V) * F;
-}
-
-// Diffuse BRDF
-float Fd_Lambert()
-{
-    return 1.0f / PI;
-}
-
-float3 DiffuseBRDF(float3 surfaceColor, float metallic)
-{
-    float3 diffuseColor = (1.0f - metallic) * surfaceColor;
-    return Fd_Lambert() * diffuseColor;
 }
 
 VS_ENTRY
@@ -213,15 +191,15 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
     PerFrame frame                  = GetBufferConstants(PerFrame, params.pFrame);
     ShadowConstants shadowConstants = GetBufferConstants(ShadowConstants, params.pShadowConstants);
-    SamplerState samplerLinear      = GetSamplerLinear();
+    SamplerState samplerPoint       = GetSamplerPoint();
     Texture2D<float4> gbufferA      = GetTexture2DFloat4(params.gbufferA);
     Texture2D<float4> gbufferB      = GetTexture2DFloat4(params.gbufferB);
     Texture2D<float4> depthBuffer   = GetTexture2DFloat4(params.depthBuffer);
 
     float2 uv = psIn.uv;
-    float4 sampleA = gbufferA.Sample(samplerLinear, uv);   // rgb = Diffuse color, a = Metallic
-    float4 sampleB = gbufferB.Sample(samplerLinear, uv);   // rg = Encoded normal, b = Roughness
-    float depth = depthBuffer.Sample(samplerLinear, uv).r;
+    float4 sampleA = gbufferA.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Metallic
+    float4 sampleB = gbufferB.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Roughness
+    float depth = depthBuffer.Sample(samplerPoint, uv).r;
 
     // BRDF inputs
     float3 L = normalize(-frame.mLight1.xyz);
@@ -233,29 +211,38 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     float3 V = normalize(camPos - worldPos);
     float3 H = normalize(V + L);
 
-    float NoV = abs(dot(N, V)) + 1e-5;
-    float NoL = clamp(dot(N, L), 0.0f, 1.0f);
-    float NoH = clamp(dot(N, H), 0.0f, 1.0f);
-    float LoH = clamp(dot(L, H), 0.0f, 1.0f);
-
-    float3 surfaceColor = sampleA.rgb;
-    float roughness = sampleA.a;
-    roughness *= roughness;     // Linear roughness -> Perceptual roughness
-    float metallic = sampleB.b;
-
-    // Specular BRDF
-    float3 Fr = SpecularBRDF(NoH, NoV, NoL, LoH, surfaceColor, roughness, metallic);
-
-    // Diffuse BRDF
-    float3 Fd = DiffuseBRDF(surfaceColor.rgb, metallic);
+    float NoV = saturate(dot(N, V));
+    float NoL = saturate(dot(N, L));
+    float NoH = saturate(dot(N, H));
+    float LoH = saturate(dot(L, H));
 
     float intensity = frame.mLight1.w;
     float3 lightColor = frame.mLight2.rgb;
+
+    float3 baseColor = sampleA.rgb;
+    float metallic = sampleB.b;
+    float perceptualRoughness = sampleA.a;
+    float roughness = perceptualRoughness * perceptualRoughness;
+
+    // Direct lighting
+    float3 F0 = F_F0(baseColor, metallic);
+    float3 F = F_Schlick(LoH, F0);
+
+    float3 kS = F;
+    float3 kD = (1.0 - kS) * (1.0 - metallic);
+
+    float D = D_GGX(NoH, roughness);
+    float G = V_SmithGGXCorrelated(NoV, NoL, roughness);
+
+    float3 Fr = D * G * F;
+    float3 Fd = baseColor / PI;
+    float3 BRDF = Fr + kD * Fd;
+
     float4 result = float4(0.0f, 0.0f, 0.0f, 1.0f);
 
-    // Ambient lighting
+    // Ambient lighting TODO(caio): subsitute this for IBL later
     float ambient = frame.mLight2.w;
-    result.rgb += ambient * surfaceColor * lightColor;
+    result.rgb += ambient * baseColor * lightColor;
 
     // TODO(caio): Shadow cascades have sharp cutoff. Need to implement some sort of blending.
     // This should be more apparent with soft shadows.
@@ -263,7 +250,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     float shadowVisibility = GetShadowVisibility(frame, shadowConstants, worldPos, shadowCascade);
 
     // Directional lighting
-    result.rgb += (Fr + Fd) * NoL * intensity * lightColor * shadowVisibility; 
+    result.rgb += BRDF * NoL * intensity * lightColor * shadowVisibility; 
 
     return result;
 }
