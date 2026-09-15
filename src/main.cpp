@@ -201,9 +201,11 @@ void processLoadRequests(App* pApp)
         LOG("Reloading shaders...");
         removePipelines();
         removeResources();
+        removeRenderTargets();
         removeShaders();
 
         addShaders();
+        addRenderTargets();
         addResources();
         addPipelines();
         removeLoadRequest(&gApp, LOAD_REQUEST_SHADER);
