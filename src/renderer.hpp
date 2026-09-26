@@ -127,8 +127,9 @@ struct SceneRenderer
     ComputePipeline* pPipeGenerateDrawsShadowMap = NULL;
 
     // Hi-Z mip generation pass
-    Shader* pCSHiZDownsample = NULL;
-    ComputePipeline* pPipeHiZDownsample = NULL;
+    Shader* pVSHiZDownsample = NULL;
+    Shader* pPSHiZDownsample = NULL;
+    GraphicsPipeline* pPipeHiZDownsample = NULL;
 
     // Shadow map pass
     RenderTarget* pRTShadows[MAX_CASCADES];
@@ -141,8 +142,7 @@ struct SceneRenderer
     GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
 
     // Depth pre-pass
-    RenderTarget* pRTSceneDepth = NULL;
-    Texture* pDepthHierarchyTextures[HIZ_MAX];
+    RenderTarget* pRTDepthHierarchy[HIZ_MAX];
     uint32 mDepthHierarchyCount = 0;
     Shader* pVSDepthPrePass = NULL;
     Shader* pPSDepthPrePass = NULL;
