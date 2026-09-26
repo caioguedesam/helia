@@ -21,12 +21,6 @@ struct DirectionalLight
     v3f mColor = {1,1,1};
 };
 
-struct ShadowSettings
-{
-    // TODO(cguedes): Should I move this to shadow constants?
-    float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
-};
-
 void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances);
 m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade);
 
@@ -58,12 +52,14 @@ STATIC_ASSERT(IS_ALIGNED(sizeof(PerFrame), BUFFER_ALIGN));
 
 struct ShadowConstants
 {
+    uint32 mShadowMode = 1;     // 0: regular shadow mapping, 1: MSM
     // Biases (x1000)
     float mDepthBias = 0.f;
     float mMomentBias = 0.003f;
     float mBleedingReduction = 0.f;
+    float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
 
-    uint32 mPadding0;
+    uint32 mPadding0[3];
 };
 STATIC_ASSERT(IS_ALIGNED(sizeof(ShadowConstants), BUFFER_ALIGN));
 
@@ -86,7 +82,6 @@ struct SceneRenderer
     ShadowConstants shadowConstants = {};
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
-    ShadowSettings mShadowSettings = {};
     float mAmbient = 0.f;
     GpuTimer mGpuTimer = {};
     Array<float> mDebugVerts;

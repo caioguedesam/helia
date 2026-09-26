@@ -34,3 +34,5 @@
 // App defines
 #define APP_WIDTH 800
 #define APP_HEIGHT 600
+
+#define SHADOW_MODE_MSM 1

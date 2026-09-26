@@ -74,11 +74,15 @@ struct PerFrame
 
 struct ShadowConstants
 {
+    uint mMode;
     float mDepthBias;
     float mMomentBias;
     float mBleedingReduction;
+    float mCascadeSplitFactor;
 
     uint mPadding0;
+    uint mPadding1;
+    uint mPadding2;
 };
 
 // TODO(caio): Do I need to align this to 16 byte?

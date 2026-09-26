@@ -131,11 +131,19 @@ float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float
     }
 
     Texture2D<float4> shadowMap = GetTexture2DFloat4(frame.mHandleShadowMaps[cascade]);
-    float4 moments = shadowMap.Sample(GetSamplerLinear(), uv);
-
-    float result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
-
-    result = ReduceLightBleeding(shadowConstants, result);
+    float result;
+    if(shadowConstants.mMode == SHADOW_MODE_MSM)
+    {
+        float4 moments = shadowMap.Sample(GetSamplerLinear(), uv);
+        result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
+        result = ReduceLightBleeding(shadowConstants, result);
+    }
+    else
+    {
+        float z = shadowMap.Sample(GetSamplerPoint(), uv).r;
+        zf = zf - shadowConstants.mDepthBias * 0.001f;
+        result = (z > zf) ? 0.0 : 1.0;
+    }
 
     return result;
 }

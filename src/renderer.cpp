@@ -22,7 +22,7 @@ void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDi
     float zNear = pCam->mDesc.mNear;
     float zFar = pCam->mDesc.mFar;
 
-    float lambda = pSceneRenderer->mShadowSettings.kSplitFactor;
+    float lambda = pSceneRenderer->shadowConstants.kSplitFactor;
 
     // Distances are stored as far plane for respective cascade.
     // Near for cascade n is far for cascade n-1.
@@ -1287,6 +1287,26 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
             uiSeparator(str("Shadows"));
 
+            String shadowModes[2] = {str("Regular"), str("MSM")};
+            int shadowMode = pSceneRenderer->shadowConstants.mShadowMode;
+            uiCombo(str("Mode"), &shadowMode, shadowModes, 2);
+            pSceneRenderer->shadowConstants.mShadowMode = shadowMode;
+
+            uiSliderf(
+                str("Depth Bias"),
+                &pSceneRenderer->shadowConstants.mDepthBias,
+                -1.f,
+                1.f);
+
+            if(shadowMode == SHADOW_MODE_MSM)
+            {
+                uiSliderf(
+                    str("Moment Bias"),
+                    &pSceneRenderer->shadowConstants.mMomentBias,
+                    0.f,
+                    1.f);
+            }
+
             uiSliderf(
                 str("Light Bleeding Reduction"),
                 &pSceneRenderer->shadowConstants.mBleedingReduction,
@@ -1295,7 +1315,7 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
             uiSliderf(
                 str("Cascade Split Factor"),
-                &pSceneRenderer->mShadowSettings.kSplitFactor,
+                &pSceneRenderer->shadowConstants.kSplitFactor,
                 0.f,
                 1.f);
 
