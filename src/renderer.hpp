@@ -137,8 +137,7 @@ struct SceneRenderer
     GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
 
     // Depth pre-pass
-    RenderTarget* pRTDepthHierarchy[HIZ_MAX];
-    uint32 mDepthHierarchyCount = 0;
+    RenderTarget* pRTSceneDepth;
     Shader* pVSDepthPrePass = NULL;
     Shader* pPSDepthPrePass = NULL;
     GraphicsPipeline* pPipeDepthPrePass = NULL;

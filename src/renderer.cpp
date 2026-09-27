@@ -434,22 +434,10 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mFormat = FORMAT_D32_SFLOAT;
         uint32 w = pSceneRenderer->pApp->mWindow.mWidth;
         uint32 h = pSceneRenderer->pApp->mWindow.mHeight;
-        pSceneRenderer->mDepthHierarchyCount = 0;
-
-        for(uint32 i = 0; i < HIZ_MAX; i++)
-        {
-            desc.mWidth = w;
-            desc.mHeight = h;
-            initDepthTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTDepthHierarchy[i]);
-            pSceneRenderer->mDepthHierarchyCount++;
-
-            w = MAX(w / 2, 1);
-            h = MAX(h / 2, 1);
-            if(w == 1 || h == 1)
-            {
-                break;
-            }
-        }
+        desc.mWidth = w;
+        desc.mHeight = h;
+        desc.mMipCount = MIN(HIZ_MAX, getMaxMipCount(w, h));    // Create one mip for each Hi-Z level
+        initDepthTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTSceneDepth);
     }
 
     // Shadow map cascades
@@ -521,12 +509,8 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         }
         cmdRenderTargetBarrier(pCmd, ARR_LEN(smBarriers), smBarriers);
 
-        RenderTargetBarrier depthBarriers[HIZ_MAX];
-        for(uint32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
-        {
-            depthBarriers[i] = {pSceneRenderer->pRTDepthHierarchy[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        }
-        cmdRenderTargetBarrier(pCmd, pSceneRenderer->mDepthHierarchyCount, depthBarriers);
+        RenderTargetBarrier depthBarrier = {pSceneRenderer->pRTSceneDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+        cmdRenderTargetBarrier(pCmd, 1, &depthBarrier);
 
         endCmd(pCmd);
         submitImmediateCmd(pRenderer, pCmd);
@@ -650,7 +634,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     {
         GraphicsPipelineDesc desc = {};
         desc.mRenderTargetCount = 0;
-        desc.mDepthTargetFormat = pSceneRenderer->pRTDepthHierarchy[0]->mDesc.mFormat;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
         desc.pVS = pSceneRenderer->pVSDepthPrePass;
@@ -683,7 +667,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mRenderTargetCount = 2;
         desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferA->mDesc.mFormat;
         desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferB->mDesc.mFormat;
-        desc.mDepthTargetFormat = pSceneRenderer->pRTDepthHierarchy[0]->mDesc.mFormat;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
         desc.pVS = pSceneRenderer->pVSGBuffer;
@@ -732,7 +716,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     {
         GraphicsPipelineDesc desc = {};
         desc.mRenderTargetCount = 0;
-        desc.mDepthTargetFormat = pSceneRenderer->pRTDepthHierarchy[0]->mDesc.mFormat;
+        desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
         desc.pVS = pSceneRenderer->pVSHiZDownsample;
@@ -822,10 +806,8 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
         destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadows[i]);
         destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadowsDepth[i]);
     }
-    for(int32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
-    {
-        destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTDepthHierarchy[i]);
-    }
+
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTSceneDepth);
 }
 
 void removeSceneShaders(SceneRenderer* pSceneRenderer)
@@ -938,9 +920,9 @@ void updatePerFrameData(SceneRenderer* pSceneRenderer)
     {
         pSceneRenderer->perFrameData.mHandleShadowMaps[i] = getHandle(pSceneRenderer->pRTShadows[i]->pTexture);
     }
-    for(int32 i = 0; i < pSceneRenderer->mDepthHierarchyCount; i++)
+    for(int32 i = 0; i < pSceneRenderer->pRTSceneDepth->mDesc.mMipCount; i++)
     {
-        pSceneRenderer->perFrameData.mHandleHiZ[i] = getRWHandle(pSceneRenderer->pRTDepthHierarchy[i]);
+        pSceneRenderer->perFrameData.mHandleHiZ[i] = getRWHandle(pSceneRenderer->pRTSceneDepth, i);
     }
 }
 
@@ -1503,26 +1485,28 @@ void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint3
 
     cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
     cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
-    uint32 depthCount = pSceneRenderer->mDepthHierarchyCount;
+    uint32 depthCount = pSceneRenderer->pRTSceneDepth->mDesc.mMipCount;
 
+    RenderTarget* pDepth = pSceneRenderer->pRTSceneDepth;
     RenderTargetBarrier depthBarriers[2];
-    for(int32 i = 1; i < depthCount; i++)
+    for(uint32 i = 1; i < depthCount; i++)
     {
-        RenderTarget* pCurrentRT = pSceneRenderer->pRTDepthHierarchy[i];
-        RenderTarget* pPrevRT = pSceneRenderer->pRTDepthHierarchy[i - 1];
-        depthBarriers[0] = {pCurrentRT, getImageLayout(pCurrentRT), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
-        depthBarriers[1] = {pPrevRT, getImageLayout(pPrevRT), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        uint32 currMip = i;
+        uint32 prevMip = i - 1;
+
+        depthBarriers[0] = {pDepth, getImageLayout(pDepth, currMip), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT, currMip, 1 };
+        depthBarriers[1] = {pDepth, getImageLayout(pDepth, prevMip), IMAGE_LAYOUT_SHADER_READ_ONLY, prevMip, 1 };
         cmdRenderTargetBarrier(pCmd, 2, depthBarriers);
 
         RenderTargetBindDesc bindDesc = {};
         bindDesc.mColorCount = 0;
-        bindDesc.mDepthBinding = { pCurrentRT, LOAD_OP_CLEAR, STORE_OP_STORE };
+        bindDesc.mDepthBinding = { pDepth, LOAD_OP_CLEAR, STORE_OP_STORE, currMip };
         cmdBindRenderTargets(pCmd, bindDesc);
 
         cmdResetShaderConstants(pCmd);
-        cmdPushShaderConstant(pCmd, getHandle(pPrevRT));
-        cmdPushShaderConstant(pCmd, pPrevRT->mDesc.mWidth);
-        cmdPushShaderConstant(pCmd, pPrevRT->mDesc.mHeight);
+        cmdPushShaderConstant(pCmd, getHandle(pDepth, prevMip));
+        cmdPushShaderConstant(pCmd, MAX(1, pDepth->mDesc.mWidth >> prevMip));
+        cmdPushShaderConstant(pCmd, MAX(1, pDepth->mDesc.mHeight >> prevMip));
         cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
         
         cmdDrawIndexed(pCmd, 
@@ -1532,7 +1516,8 @@ void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint3
     }
 
     // Transition last mip generated to shader read
-    depthBarriers[0] = {pSceneRenderer->pRTDepthHierarchy[depthCount - 1], getImageLayout(pSceneRenderer->pRTDepthHierarchy[depthCount - 1]), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    uint32 lastMip = depthCount - 1;
+    depthBarriers[0] = {pDepth, getImageLayout(pDepth, lastMip), IMAGE_LAYOUT_SHADER_READ_ONLY, lastMip, 1 };
     cmdRenderTargetBarrier(pCmd, 1, depthBarriers);
 
     RENDERER_SCOPE_END();
@@ -1541,7 +1526,7 @@ void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint3
 void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("Depth Pre-Pass");
-    RenderTarget* pRTDepth = pSceneRenderer->pRTDepthHierarchy[0];
+    RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
     RenderTargetBarrier barriers[1];
     barriers[0] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
     cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
@@ -1586,7 +1571,7 @@ void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fram
     RENDERER_SCOPE_BEGIN("G-Buffer Pass");
     RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
     RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-    RenderTarget* pRTDepth = pSceneRenderer->pRTDepthHierarchy[0];
+    RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBuffer;
 
@@ -1636,7 +1621,7 @@ void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
     RENDERER_SCOPE_BEGIN("Lighting Pass");
     RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
     RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
-    RenderTarget* pRTDepth = pSceneRenderer->pRTDepthHierarchy[0];
+    RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
     RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;
@@ -1762,7 +1747,7 @@ void passSwapChainCopy(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint3
     RENDERER_SCOPE_BEGIN("Swap Chain Copy");
     // Transitioning depth buffer back to general, in case descriptors reload
     {
-        RenderTarget* pRTDepth = pSceneRenderer->pRTDepthHierarchy[0];
+        RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
         RenderTargetBarrier barriers[1];
         barriers[0] = { pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_GENERAL };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
