@@ -58,14 +58,26 @@ struct ShadowConstants
     float mMomentBias = 0.003f;
     float mBleedingReduction = 0.f;
     float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
+    float mFilterRadius = 1.f;
 
-    uint32 mPadding0[3];
+    uint32 mPadding0[2];
 };
 STATIC_ASSERT(IS_ALIGNED(sizeof(ShadowConstants), BUFFER_ALIGN));
 
 struct InstanceData
 {
     uint32 mNodeId = MAX_UINT32;
+};
+
+enum SamplerType : uint32
+{
+    SAMPLER_BILINEAR_WRAP = 0,
+    SAMPLER_TRILINEAR_WRAP,
+    SAMPLER_POINT_WRAP,
+    SAMPLER_BILINEAR_CLAMP,
+    SAMPLER_TRILINEAR_CLAMP,
+    SAMPLER_POINT_CLAMP,
+    SAMPLER_COUNT,
 };
 
 struct SceneRenderer
@@ -110,8 +122,10 @@ struct SceneRenderer
 
     Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
     uint32 mMaterialMapCount = 0;
-    Sampler* pSamplerLinear = NULL;
-    Sampler* pSamplerPoint = NULL;
+    //-Sampler* pSamplerBilinear = NULL;
+    //-Sampler* pSamplerTrilinear = NULL;
+    //-Sampler* pSamplerPoint = NULL;
+    Sampler* pSamplers[SAMPLER_COUNT];
     
     DrawBuffers mDrawBuffers = {};
 
@@ -126,6 +140,11 @@ struct SceneRenderer
     Shader* pPSHiZDownsample = NULL;
     GraphicsPipeline* pPipeHiZDownsample = NULL;
 
+    // Blur down/upsample shaders
+    Shader* pVSBlur = NULL;
+    Shader* pPSBlurDownsample = NULL;
+    Shader* pPSBlurUpsample = NULL;
+
     // Shadow map pass
     RenderTarget* pRTShadows[MAX_CASCADES];
     RenderTarget* pRTShadowsDepth[MAX_CASCADES];
@@ -135,6 +154,8 @@ struct SceneRenderer
     Shader* pPSShadowMapPassDoubleSided = NULL;
     GraphicsPipeline* pPipeShadowMapPass = NULL;
     GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
+    GraphicsPipeline* pPipeShadowMapBlurDownsample = NULL;
+    GraphicsPipeline* pPipeShadowMapBlurUpsample = NULL;
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth;
@@ -218,6 +239,7 @@ enum DrawCallIssuePass
 
 void passIssueDrawCalls(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, DrawCallIssuePass type, uint32 frame);
 void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passShadowMapFilter(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);

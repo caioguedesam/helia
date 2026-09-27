@@ -134,13 +134,13 @@ float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float
     float result;
     if(shadowConstants.mMode == SHADOW_MODE_MSM)
     {
-        float4 moments = shadowMap.Sample(GetSamplerLinear(), uv);
+        float4 moments = shadowMap.SampleLevel(SAMPLER_BILINEAR_CLAMP, uv, 0.0);
         result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
         result = ReduceLightBleeding(shadowConstants, result);
     }
     else
     {
-        float z = shadowMap.Sample(GetSamplerPoint(), uv).r;
+        float z = shadowMap.SampleLevel(SAMPLER_POINT_CLAMP, uv, 0.0).r;
         zf = zf - shadowConstants.mDepthBias * 0.001f;
         result = (z > zf) ? 0.0 : 1.0;
     }
@@ -199,7 +199,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
     PerFrame frame                  = GetBufferConstants(PerFrame, params.pFrame);
     ShadowConstants shadowConstants = GetBufferConstants(ShadowConstants, params.pShadowConstants);
-    SamplerState samplerPoint       = GetSamplerPoint();
+    SamplerState samplerPoint       = SAMPLER_POINT_CLAMP;
     Texture2D<float4> gbufferA      = GetTexture2DFloat4(params.gbufferA);
     Texture2D<float4> gbufferB      = GetTexture2DFloat4(params.gbufferB);
     Texture2D<float4> depthBuffer   = GetTexture2DFloat4(params.depthBuffer);

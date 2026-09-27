@@ -65,7 +65,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
     PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
     Texture2D<float4> hdrBuffer = GetTexture2DFloat4(params.hdrBuffer);
-    SamplerState samplerPoint = GetSamplerPoint();
+    SamplerState samplerPoint = SAMPLER_POINT_CLAMP;
     float4 result = hdrBuffer.Sample(samplerPoint, psIn.uv);
 
     result.rgb = ToneMapping_ACES(result.rgb);

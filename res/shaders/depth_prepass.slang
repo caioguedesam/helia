@@ -54,7 +54,7 @@ PSIn VSMain(VSIn vsIn,
 PS_ENTRY
 void PSMain(PSIn psIn, uniform Params params)
 {
-    SamplerState samplerLinear = GetSamplerLinear();
+    SamplerState samplerLinear = SAMPLER_TRILINEAR_WRAP;
     SceneNode node = GetBuffer(SceneNode, params.pNodes)[psIn.nodeId];
     SceneMaterial material = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
 

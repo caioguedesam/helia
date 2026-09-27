@@ -45,7 +45,7 @@ PSOut PSMain(PSIn psIn, uniform Params params)
     uv.x = psIn.pos.x * 2.0 / (float)params.prevWidth;
     uv.y = psIn.pos.y * 2.0 / (float)params.prevHeight;
 
-    SamplerState samplerPoint = GetSamplerPoint();
+    SamplerState samplerPoint = SAMPLER_POINT_CLAMP;
     float4 prevDepthSamples = prevDepth.Gather(samplerPoint, uv);
 #else
     int3 currentCoord = int3(int2(psIn.pos.xy), 0);

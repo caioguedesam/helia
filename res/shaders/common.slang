@@ -79,10 +79,10 @@ struct ShadowConstants
     float mMomentBias;
     float mBleedingReduction;
     float mCascadeSplitFactor;
+    float mFilterRadius;
 
     uint mPadding0;
     uint mPadding1;
-    uint mPadding2;
 };
 
 // TODO(caio): Do I need to align this to 16 byte?
@@ -161,8 +161,12 @@ BINDING(0, 4) RWTexture2D<float>                    RWTexture2DFloatArray[];
 #define GetBufferConstants(TYPE, N)     reinterpret<TYPE*>(BufferArray.addresses[N])[0]
 
 // Reserved resources
-#define GetSamplerLinear()          SamplerArray[0]
-#define GetSamplerPoint()           SamplerArray[1]
+#define SAMPLER_BILINEAR_WRAP       SamplerArray[0]
+#define SAMPLER_TRILINEAR_WRAP      SamplerArray[1]
+#define SAMPLER_POINT_WRAP          SamplerArray[2]
+#define SAMPLER_BILINEAR_CLAMP      SamplerArray[3]
+#define SAMPLER_TRILINEAR_CLAMP     SamplerArray[4]
+#define SAMPLER_POINT_CLAMP         SamplerArray[5]
 
 #define VS_ENTRY [shader("vertex")]
 #define PS_ENTRY [shader("fragment")]
@@ -174,4 +178,10 @@ BINDING(0, 4) RWTexture2D<float>                    RWTexture2DFloatArray[];
 #endif
 #ifndef DOUBLE_SIDED
 #define DOUBLE_SIDED 0
+#endif
+#ifndef BLUR_DOWNSAMPLE
+#define BLUR_DOWNSAMPLE 0
+#endif
+#ifndef BLUR_UPSAMPLE
+#define BLUR_UPSAMPLE 0
 #endif

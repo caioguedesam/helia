@@ -50,7 +50,7 @@ PS_ENTRY
 float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
     // TODO(caio): Not great that shadow pass
-    SamplerState samplerLinear = GetSamplerLinear();
+    SamplerState samplerLinear = SAMPLER_TRILINEAR_WRAP;
     SceneNode node = GetBuffer(SceneNode, params.pNodes)[psIn.nodeId];
     SceneMaterial material = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
 

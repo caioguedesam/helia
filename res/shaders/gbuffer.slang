@@ -103,7 +103,7 @@ PSOut PSMain(PSIn psIn,
     PSOut output;
 
     PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
-    SamplerState samplerLinear = GetSamplerLinear();
+    SamplerState samplerLinear = SAMPLER_TRILINEAR_WRAP;
 
     SceneNode node = GetBuffer(SceneNode, params.pNodes)[psIn.nodeId];
     SceneMaterial material = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
