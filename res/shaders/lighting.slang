@@ -55,15 +55,27 @@ uint GetCascadeIndex(PerFrame frame, float3 worldPos)
     return cascade;
 }
 
-float MSMGetShadowVisibility(float4 moments, float fragmentDepth, float depthBias, float momentBias)
+// Change moments from reverse z to regular z
+float4 FlipMoments(float4 m)
+{
+    return float4(
+        1.0 - m.x,
+        1.0 - 2.0*m.x + m.y,
+        1.0 - 3.0*m.x + 3.0*m.y - m.z,
+        1.0 - 4.0*m.x + 6.0*m.y - 4.0*m.z + m.w);
+}
+
+float MSMGetShadowVisibility(float4 momentsReverseZ, float fragmentDepth, float depthBias, float momentBias)
 {
     // Based on MJP's Moment Shadow Mapping implementation:
     // https://github.com/TheRealMJP/Shadows/blob/master/Shadows/MSM.hlsl
 
     // Bias input data to avoid artifacts
+    float4 moments = FlipMoments(momentsReverseZ);
     float4 b = lerp(moments, float4(0.5f, 0.5f, 0.5f, 0.5f), momentBias);
     float3 z;
-    z[0] = fragmentDepth - depthBias;
+    //z[0] = fragmentDepth - depthBias;
+    z[0] = (1.0 - fragmentDepth) - depthBias;
 
     // Compute a Cholesky factorization of the Hankel matrix B storing only non-
     // trivial entries or related products
@@ -94,14 +106,14 @@ float MSMGetShadowVisibility(float4 moments, float fragmentDepth, float depthBia
     float p = c[1] / c[2];
     float q = c[0] / c[2];
     float D = (p * p * 0.25f) - q;
-    float r = sqrt(D);
+    float r = sqrt(max(D, 0.0f));
     z[1] =- p * 0.5f - r;
     z[2] =- p * 0.5f + r;
 
     // Compute the shadow intensity by summing the appropriate weights
     // Taking reverse Z into account as well.
-    float4 switchVal = (z[2] >= z[0]) ? float4(z[1], z[0], 1.0f, 1.0f) :
-                      ((z[1] >= z[0]) ? float4(z[0], z[1], 0.0f, 1.0f) :
+    float4 switchVal = (z[2] < z[0]) ? float4(z[1], z[0], 1.0f, 1.0f) :
+                      ((z[1] < z[0]) ? float4(z[0], z[1], 0.0f, 1.0f) :
                       float4(0.0f,0.0f,0.0f,0.0f));
     float quotient = (switchVal[0] * z[2] - b[0] * (switchVal[0] + z[2]) + b[1])/((z[2] - switchVal[1]) * (z[0] - z[1]));
     float shadowIntensity = switchVal[2] + switchVal[3] * quotient;

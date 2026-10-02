@@ -122,9 +122,6 @@ struct SceneRenderer
 
     Texture* pTexMaterialMaps[SCENE_MAX_TEXTURES];
     uint32 mMaterialMapCount = 0;
-    //-Sampler* pSamplerBilinear = NULL;
-    //-Sampler* pSamplerTrilinear = NULL;
-    //-Sampler* pSamplerPoint = NULL;
     Sampler* pSamplers[SAMPLER_COUNT];
     
     DrawBuffers mDrawBuffers = {};
@@ -147,15 +144,14 @@ struct SceneRenderer
 
     // Shadow map pass
     RenderTarget* pRTShadows[MAX_CASCADES];
-    RenderTarget* pRTShadowsDepth[MAX_CASCADES];
+    RenderTarget* pRTShadowsResolved[MAX_CASCADES];
+    RenderTarget* pRTShadowsDepth;
     Shader* pVSShadowMapPass = NULL;
     Shader* pPSShadowMapPass = NULL;
     Shader* pVSShadowMapPassDoubleSided = NULL;
     Shader* pPSShadowMapPassDoubleSided = NULL;
     GraphicsPipeline* pPipeShadowMapPass = NULL;
     GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
-    GraphicsPipeline* pPipeShadowMapBlurDownsample = NULL;
-    GraphicsPipeline* pPipeShadowMapBlurUpsample = NULL;
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth;
@@ -239,7 +235,6 @@ enum DrawCallIssuePass
 
 void passIssueDrawCalls(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, DrawCallIssuePass type, uint32 frame);
 void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
-void passShadowMapFilter(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);

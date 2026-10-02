@@ -67,8 +67,8 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 
     // Storing moments 1 - 4 in shadow map
     float z = psIn.pos.z;
-    float z2 = pow(z, 2.0);
-    float z3 = pow(z, 3.0);
-    float z4 = pow(z, 4.0);
+    float z2 = z * z;
+    float z3 = z2 * z;
+    float z4 = z2 * z2;
     return float4(z, z2, z3, z4);
 }
