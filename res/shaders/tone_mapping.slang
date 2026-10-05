@@ -4,6 +4,8 @@ struct Params
 {
     uint pFrame;
     uint hdrBuffer;
+    uint bloomBuffer;
+    float bloomStrength;
 };
 
 struct VSIn
@@ -65,8 +67,12 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
     PerFrame frame = GetBufferConstants(PerFrame, params.pFrame);
     Texture2D<float4> hdrBuffer = GetTexture2DFloat4(params.hdrBuffer);
+    Texture2D<float4> bloomBuffer = GetTexture2DFloat4(params.bloomBuffer);
     SamplerState samplerPoint = SAMPLER_POINT_CLAMP;
-    float4 result = hdrBuffer.Sample(samplerPoint, psIn.uv);
+    float4 result = lerp(
+        hdrBuffer.Sample(samplerPoint, psIn.uv),
+        bloomBuffer.Sample(samplerPoint, psIn.uv),
+        params.bloomStrength);
 
     result.rgb = ToneMapping_ACES(result.rgb);
     //result.rgb = ToneMapping_Hable(result.rgb);

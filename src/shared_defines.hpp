@@ -39,3 +39,6 @@
 #define SHADOW_MODE_MSM 1
 
 #define MSAA_SAMPLES 4
+//#define MSAA_SAMPLES 1
+
+#define BLOOM_STEPS 4

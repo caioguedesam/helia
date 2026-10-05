@@ -69,6 +69,12 @@ struct InstanceData
     uint32 mNodeId = MAX_UINT32;
 };
 
+struct BloomSettings
+{
+    float mRadius   = 0.1f;     // in texture coordinates
+    float mStrength = 0.04f;
+};
+
 enum SamplerType : uint32
 {
     SAMPLER_BILINEAR_WRAP = 0,
@@ -95,6 +101,7 @@ struct SceneRenderer
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
     float mAmbient = 0.f;
+    BloomSettings mBloomSettings = {};
     GpuTimer mGpuTimer = {};
     Array<float> mDebugVerts;
 
@@ -137,11 +144,6 @@ struct SceneRenderer
     Shader* pPSHiZDownsample = NULL;
     GraphicsPipeline* pPipeHiZDownsample = NULL;
 
-    // Blur down/upsample shaders
-    Shader* pVSBlur = NULL;
-    Shader* pPSBlurDownsample = NULL;
-    Shader* pPSBlurUpsample = NULL;
-
     // Shadow map pass
     RenderTarget* pRTShadows[MAX_CASCADES];
     RenderTarget* pRTShadowsResolved[MAX_CASCADES];
@@ -178,13 +180,26 @@ struct SceneRenderer
     Shader* pPSLighting = NULL;
     GraphicsPipeline* pPipeLighting = NULL;
 
+    // Texture copy
+    Shader* pVSCopyTexture = NULL;
+    Shader* pPSCopyTexture = NULL;
+    GraphicsPipeline* pPipeCopyTextureB10G11R11 = NULL;
+
+    // Bloom pass
+    Shader* pVSBloom = NULL;
+    Shader* pPSBloomDownsample = NULL;
+    Shader* pPSBloomUpsample = NULL;
+    RenderTarget* pRTBloom = NULL;
+    GraphicsPipeline* pPipeBloomDownsample = NULL;
+    GraphicsPipeline* pPipeBloomUpsample = NULL;
+
     // Debug pass
     Shader* pVSDebug = NULL;
     Shader* pPSDebug = NULL;
     GraphicsPipeline* pPipeDebug = NULL;
     bool mFreezeMainCam = false;
 
-    // Final present pass
+    // Tonemapping + HDR pass
     RenderTarget* pRTPresent = NULL;
     Shader* pVSTonemapping = NULL;
     Shader* pPSTonemapping = NULL;
@@ -239,6 +254,7 @@ void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint3
 void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passBloom(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passTonemapping(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passUI(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
