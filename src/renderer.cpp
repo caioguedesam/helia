@@ -138,7 +138,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
 
         initTexture(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pTexSampledStorageFallback);
 
-        CommandBuffer* pCmd = getCmd(pRenderer, true);
+        CommandBuffer* pCmd = getCmd(pRenderer, COMMAND_BUFFER_TYPE_IMMEDIATE);
         beginCmd(pCmd);
         TextureBarrier barrier = {pSceneRenderer->pTexSampledStorageFallback, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
         cmdTextureBarrier(pCmd, 1, &barrier);
@@ -236,14 +236,14 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         };
 
         BufferDesc vbDesc = {};
-        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mType = BUFFER_TYPE_VERTEX | BUFFER_TYPE_TRANSFER_DST;
         vbDesc.mSize = ARR_LEN(vertexData) * sizeof(float);
         vbDesc.mCount = ARR_LEN(vertexData) / 4;
         vbDesc.mStride = sizeof(float);     // Should this be * 4?
         initBuffer(pResMan, vbDesc, &pSceneRenderer->pVBScreenQuad, vertexData);
 
         BufferDesc ibDesc = {};
-        ibDesc.mType = BUFFER_TYPE_INDEX;
+        ibDesc.mType = BUFFER_TYPE_INDEX | BUFFER_TYPE_TRANSFER_DST;
         ibDesc.mSize = ARR_LEN(indexData) * sizeof(uint16);
         ibDesc.mCount = ARR_LEN(indexData);
         ibDesc.mStride = sizeof(uint16);
@@ -253,7 +253,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Debug vertex buffer
     {
         BufferDesc vbDesc = {};
-        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mType = BUFFER_TYPE_VERTEX | BUFFER_TYPE_TRANSFER_DST;
         vbDesc.mSize = MAX_DEBUG_VERTS;
         vbDesc.mCount = MAX_DEBUG_VERTS / 6;
         vbDesc.mStride = sizeof(float);     // Should this be * 6?
@@ -266,14 +266,14 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Geometry vertex/index buffers
     {
         BufferDesc vbDesc = {};
-        vbDesc.mType = BUFFER_TYPE_VERTEX;
+        vbDesc.mType = BUFFER_TYPE_VERTEX | BUFFER_TYPE_TRANSFER_DST;
         vbDesc.mSize = pScene->vertexCount * sizeof(float) * 12;
         vbDesc.mCount = pScene->vertexCount;
         vbDesc.mStride = sizeof(float);     // Should this be * 12?
         initBuffer(pResMan, vbDesc, &pSceneRenderer->pVBSceneGeometry, pScene->pVertexData);
 
         BufferDesc ibDesc = {};
-        ibDesc.mType = BUFFER_TYPE_INDEX;
+        ibDesc.mType = BUFFER_TYPE_INDEX | BUFFER_TYPE_TRANSFER_DST;
         ibDesc.mSize = pScene->indexCount * sizeof(uint16);
         ibDesc.mCount = pScene->indexCount;
         ibDesc.mStride = sizeof(uint16);
@@ -283,19 +283,19 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     // Scene nodes/meshes buffers
     {
         BufferDesc desc = {};
-        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mType = BUFFER_TYPE_STORAGE | BUFFER_TYPE_TRANSFER_DST;
         desc.mSize = sizeof(SceneNode) * SCENE_MAX_NODES;
         desc.mCount = SCENE_MAX_NODES;
         desc.mStride = sizeof(SceneNode);
         initBuffer(pResMan, desc, &pSceneRenderer->pSBSceneNodes, &pScene->mNodes[0]);
 
-        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mType = BUFFER_TYPE_STORAGE | BUFFER_TYPE_TRANSFER_DST;
         desc.mSize = sizeof(SceneMesh) * SCENE_MAX_MESHES;
         desc.mCount = SCENE_MAX_MESHES;
         desc.mStride = sizeof(SceneMesh);
         initBuffer(pResMan, desc, &pSceneRenderer->pSBSceneMeshes, &pScene->mMeshes[0]);
 
-        desc.mType = BUFFER_TYPE_STORAGE;
+        desc.mType = BUFFER_TYPE_STORAGE | BUFFER_TYPE_TRANSFER_DST;
         desc.mSize = sizeof(SceneMaterial) * SCENE_MAX_MATERIALS;
         desc.mCount = SCENE_MAX_MATERIALS;
         desc.mStride = sizeof(SceneMaterial);
@@ -359,10 +359,11 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
     {
         BufferDesc desc = {};
-        desc.mType = BUFFER_TYPE_UNIFORM;
+        desc.mType = BUFFER_TYPE_UNIFORM | BUFFER_TYPE_TRANSFER_DST;
         desc.mSize = sizeof(PerFrame);
         desc.mCount = 1;
         desc.mStride = sizeof(PerFrame);
+        desc.mFlags = BUFFER_FLAGS_HOST_MAPPED;
         initBuffer(pResMan, desc, &pSceneRenderer->pCBPerFrame[i]);
     }
 
@@ -370,10 +371,11 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
     {
         BufferDesc desc = {};
-        desc.mType = BUFFER_TYPE_UNIFORM;
+        desc.mType = BUFFER_TYPE_UNIFORM | BUFFER_TYPE_TRANSFER_DST;
         desc.mSize = sizeof(ShadowConstants);
         desc.mCount = 1;
         desc.mStride = sizeof(ShadowConstants);
+        desc.mFlags = BUFFER_FLAGS_HOST_MAPPED;
         initBuffer(pResMan, desc, &pSceneRenderer->pCBShadowConstants[i]);
     }
 
@@ -532,7 +534,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
         initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTPresent);
 
-        CommandBuffer* pCmd = getCmd(pRenderer, true);
+        CommandBuffer* pCmd = getCmd(pRenderer, COMMAND_BUFFER_TYPE_IMMEDIATE);
         beginCmd(pCmd);
 
         RenderTargetBarrier barrier = {pSceneRenderer->pRTPresent, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
@@ -544,7 +546,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
     // Transitioning render targets so they can be bound to descriptor sets
     {
-        CommandBuffer* pCmd = getCmd(pRenderer, true);
+        CommandBuffer* pCmd = getCmd(pRenderer, COMMAND_BUFFER_TYPE_IMMEDIATE);
         beginCmd(pCmd);
 
         RenderTargetBarrier barriers[4];
@@ -1067,13 +1069,13 @@ void uploadPerFrameData(SceneRenderer* pSceneRenderer)
 {
     Renderer* pRenderer = pSceneRenderer->pRenderer;
     uint32 activeFrame = pRenderer->mActiveFrame;
-    copyToBuffer(pRenderer, 
+    copyHostDataToBuffer(pRenderer, 
             pSceneRenderer->pCBPerFrame[activeFrame], 
             0, 
             &pSceneRenderer->perFrameData, 
             sizeof(PerFrame));
 
-    copyToBuffer(pRenderer, 
+    copyHostDataToBuffer(pRenderer, 
             pSceneRenderer->pCBShadowConstants[activeFrame], 
             0, 
             &pSceneRenderer->shadowConstants, 
@@ -1320,7 +1322,7 @@ void debugGeometryEnd(SceneRenderer* pSceneRenderer)
     }
 
     // Copying data to GPU vertex buffer
-    copyToBuffer(pSceneRenderer->pRenderer, 
+    copyHostDataToBuffer(pSceneRenderer->pRenderer, 
             pSceneRenderer->pVBDebug[pSceneRenderer->pRenderer->mActiveFrame], 
             0, 
             pSceneRenderer->mDebugVerts.mData, 
@@ -2061,7 +2063,7 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
 
     advanceFrame(pRenderer, frame);
 
-    CommandBuffer* pCmd = getCmd(pRenderer);
+    CommandBuffer* pCmd = getCmd(pRenderer, COMMAND_BUFFER_TYPE_FRAME);
     beginCmd(pCmd);
 
     acquireNextImage(pRenderer);

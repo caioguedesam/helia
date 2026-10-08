@@ -217,9 +217,10 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     Texture2D<float4> depthBuffer   = GetTexture2DFloat4(params.depthBuffer);
 
     float2 uv = psIn.uv;
-    float4 sampleA = gbufferA.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Metallic
-    float4 sampleB = gbufferB.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Roughness
+    float4 sampleA = gbufferA.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Roughness
+    float4 sampleB = gbufferB.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Metallic
     float depth = depthBuffer.Sample(samplerPoint, uv).r;
+    if(depth == 0.0) return float4(0.0, 0.0, 0.0, 1.0);
 
     // BRDF inputs
     float3 L = normalize(-frame.mLight1.xyz);
