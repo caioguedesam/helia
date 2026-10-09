@@ -45,12 +45,22 @@ struct SceneMaterial
 struct PerFrame
 {
     float4x4 mView;
-    float4x4 mProj;
-    float4x4 mMainView;
-    float4x4 mMainProj;
-    float4x4 mViewProj;
     float4x4 mInvView;
+    float4x4 mCullView;
+
+    // Jittered matrices
+    float4x4 mProj;
     float4x4 mInvProj;
+    float4x4 mViewProj;
+    float4x4 mInvViewProj;
+    float4x4 mCullProj;
+
+    // Unjittered matrices
+    float4x4 mProjUnjitter;
+    float4x4 mInvProjUnjitter;
+    float4x4 mViewProjUnjitter;
+    float4x4 mInvViewProjUnjitter;
+    float4x4 mPrevViewProjUnjitter;
 
     float4x4 mShadowCascadesViewProj[MAX_CASCADES];
 
@@ -137,6 +147,16 @@ float3x3 As3x3(float4x4 m)
         m._21, m._22, m._23,
         m._31, m._32, m._33
     );
+}
+
+float3 WorldPositionFromDepth(float z, float2 uv, float4x4 mInvViewProj)
+{
+    // From depth [0, 1] to clip space
+    float4 clipPos = float4(uv * 2.0f - 1.0f, z, 1.0f);
+    // Clip to world space
+    float4 worldPos = mul(mInvViewProj, clipPos);
+    // Perspective divide
+    return worldPos.xyz / worldPos.w;
 }
 
 #define BINDING(SET, SPACE) [[vk::binding(SPACE, SET)]]

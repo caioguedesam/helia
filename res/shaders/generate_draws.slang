@@ -55,7 +55,7 @@ bool CameraFrustumTest(SceneNode node, PerFrame frame)
     // AABB is in frustum if, for each plane, the point furthest along the plane's normal
     // is inside it's half-space.
     float4 planes[6];
-    FrustumPlanesFromViewProj(mul(frame.mMainProj, frame.mMainView), planes);
+    FrustumPlanesFromViewProj(mul(frame.mCullProj, frame.mCullView), planes);
 
     for(int i = 0; i < 6; i++)
     {
@@ -132,7 +132,7 @@ bool OcclusionTest(SceneNode node, PerFrame frame)
     {
         // Convert to clip space
         // TODO(caio): Change this to premultiplied view proj
-        p[i] = mul(mul(frame.mMainProj, frame.mMainView), p[i]);
+        p[i] = mul(mul(frame.mCullProj, frame.mCullView), p[i]);
         p[i] = p[i] / p[i].w;
 
         // Early out: if any AABB corner is out of bounds, don't test.

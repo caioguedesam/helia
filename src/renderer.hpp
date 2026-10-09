@@ -27,12 +27,22 @@ m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDist
 struct PerFrame
 {
     m4f mView = {};
-    m4f mProj = {};
-    m4f mMainView = {};
-    m4f mMainProj = {};
-    m4f mViewProj = {};
     m4f mInvView = {};
+    m4f mCullView = {};
+
+    // Jittered
+    m4f mProj = {};
     m4f mInvProj = {};
+    m4f mViewProj = {};
+    m4f mInvViewProj = {};
+    m4f mCullProj = {};
+
+    // Unjittered
+    m4f mProjUnjitter = {};
+    m4f mInvProjUnjitter = {};
+    m4f mViewProjUnjitter = {};
+    m4f mInvViewProjUnjitter = {};
+    m4f mPrevViewProjUnjitter = {};
 
     m4f mShadowCascadesViewProj[MAX_CASCADES];
 
@@ -102,6 +112,7 @@ struct SceneRenderer
     DirectionalLight mDirLight = {};
     float mAmbient = 0.f;
     BloomSettings mBloomSettings = {};
+    bool mEnableTAA = true;
     GpuTimer mGpuTimer = {};
     Array<float> mDebugVerts;
 
@@ -165,8 +176,9 @@ struct SceneRenderer
     GraphicsPipeline* pPipeDepthPrePassDoubleSided = NULL;
 
     // GBuffer draw pass
-    RenderTarget* pRTGBufferA = NULL;
-    RenderTarget* pRTGBufferB = NULL;
+    RenderTarget* pRTGBufferAlbedoMetallic = NULL;
+    RenderTarget* pRTGBufferNormalRoughness = NULL;
+    RenderTarget* pRTGBufferVelocity = NULL;
     Shader* pVSGBuffer = NULL;
     Shader* pPSGBuffer = NULL;
     GraphicsPipeline* pPipeGBuffer = NULL;
@@ -175,7 +187,7 @@ struct SceneRenderer
     GraphicsPipeline* pPipeGBufferDoubleSided = NULL;
 
     // Lighting pass
-    RenderTarget* pRTAccum = NULL;
+    RenderTarget* pRTCurrentHDR = NULL;
     Shader* pVSLighting = NULL;
     Shader* pPSLighting = NULL;
     GraphicsPipeline* pPipeLighting = NULL;
@@ -198,6 +210,13 @@ struct SceneRenderer
     Shader* pPSDebug = NULL;
     GraphicsPipeline* pPipeDebug = NULL;
     bool mFreezeMainCam = false;
+
+    // TAA pass
+    RenderTarget* pRTPreviousHDR = NULL;
+    RenderTarget* pRTAccumulatedHDR = NULL;
+    Shader* pVSTemporalResolve = NULL;
+    Shader* pPSTemporalResolve = NULL;
+    GraphicsPipeline* pPipeTemporalResolve = NULL;
 
     // Tonemapping + HDR pass
     RenderTarget* pRTPresent = NULL;
@@ -222,7 +241,7 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer);
 void removeSceneResources(SceneRenderer* pSceneRenderer);
 void removeScenePipelines(SceneRenderer* pSceneRenderer);
 
-void updatePerFrameData(SceneRenderer* pSceneRenderer);
+void updatePerFrameData(SceneRenderer* pSceneRenderer, uint32 frame);
 void uploadPerFrameData(SceneRenderer* pSceneRenderer);
 
 void debugAddVertex(SceneRenderer* pSceneRenderer, v3f pos, v3f col);
@@ -248,12 +267,14 @@ enum DrawCallIssuePass
     DRAW_CALL_ISSUE_OPAQUE,
 };
 
+void subpassCopyTargetR11G11B10(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, RenderTarget* pSrc, RenderTarget* pDst, uint32 mipLevel = 0);
 void passIssueDrawCalls(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, DrawCallIssuePass type, uint32 frame);
 void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passHiZDownsample(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
+void passTemporalResolve(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passBloom(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);
 void passTonemapping(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame);

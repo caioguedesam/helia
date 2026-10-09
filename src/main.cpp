@@ -163,7 +163,7 @@ void update()
 
     updateCamera(&gSceneRenderer.mCamera, gApp.mDt);
 
-    updatePerFrameData(&gSceneRenderer);
+    updatePerFrameData(&gSceneRenderer, gFrame);
 }
 
 void render()

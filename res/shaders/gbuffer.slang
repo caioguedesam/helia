@@ -29,12 +29,16 @@ struct PSIn
     float3 worldPos : TEXCOORD3;
     float3 tangent : TEXCOORD4;
     float3 bitangent : TEXCOORD5;
+    // Velocity
+    float4 currClipPos : TEXCOORD6;
+    float4 prevClipPos : TEXCOORD7;
 };
 
 struct PSOut
 {
-    float4 gbufferA : SV_Target0;
-    float4 gbufferB : SV_Target1;
+    float4 gbufferAlbedoMetallic : SV_Target0;
+    float4 gbufferNormalRoughness : SV_Target1;
+    float2 gbufferVelocity : SV_Target2;
 };
 
 float3x3 GetTBN(float3 N, float3 p, float2 uv)
@@ -92,6 +96,11 @@ PSIn VSMain(VSIn vsIn,
     result.bitangent = cross(result.normal, result.tangent) * vsIn.tangent.w;
 #endif
 
+    // Velocity
+    // TODO(caio): If models ever move I need to transform by previous transform matrix as well.
+    result.currClipPos = mul(frame.mViewProjUnjitter, worldPos);
+    result.prevClipPos = mul(frame.mPrevViewProjUnjitter, worldPos);
+
     return result;
 }
 
@@ -147,16 +156,23 @@ PSOut PSMain(PSIn psIn,
     normal = normalize(normal * 2.0f - 1.0f);
     normal = normalize(mul(TBN, normal));
 
+    // Velocity
+    float2 currNDC = psIn.currClipPos.xy / psIn.currClipPos.w;
+    float2 prevNDC = psIn.prevClipPos.xy / psIn.prevClipPos.w;
+    float2 velocity = (currNDC - prevNDC) * 0.5f;
+
     // Metallic + Roughness
     float4 metallicRoughness = metallicRoughnessMap.Sample(samplerLinear, uv);
 
     // Writing outputs to GBuffer
-    output.gbufferA = float4(baseColor.rgb * material.mBaseColor.rgb,
+    output.gbufferAlbedoMetallic = float4(baseColor.rgb * material.mBaseColor.rgb,
             metallicRoughness.g * material.mRoughness);
 
-    output.gbufferB = float4(EncodeNormal(normal),
+    output.gbufferNormalRoughness = float4(EncodeNormal(normal),
             metallicRoughness.b * material.mMetallic,
             0.0);
+
+    output.gbufferVelocity = velocity;
 
     return output;
 }

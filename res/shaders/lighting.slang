@@ -4,8 +4,8 @@ struct Params
 {
     uint pFrame;
     uint pShadowConstants;
-    uint gbufferA;
-    uint gbufferB;
+    uint gbufferAlbedoMetallic;
+    uint gbufferNormalRoughness;
     uint depthBuffer;
 };
 
@@ -20,21 +20,6 @@ struct PSIn
     float4 pos : SV_Position;
     float2 uv : TEXCOORD0;
 };
-
-float3 WorldPositionFromDepth(float z, float2 uv, float4x4 mInvView, float4x4 mInvProj)
-{
-    // From depth [0, 1] to clip space
-    float4 clipPos = float4(uv * 2.0f - 1.0f, z, 1.0f);
-
-    // From clip space to view space (doing perspective divide)
-    float4 viewPos = mul(mInvProj, clipPos);
-    viewPos /= viewPos.w;
-
-    // From view to world space
-    float4 worldPos = mul(mInvView, viewPos);
-
-    return worldPos.xyz;
-}
 
 // =================================
 // Shadows
@@ -209,16 +194,16 @@ PSIn VSMain(VSIn vsIn)
 PS_ENTRY
 float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
-    PerFrame frame                  = GetBufferConstants(PerFrame, params.pFrame);
-    ShadowConstants shadowConstants = GetBufferConstants(ShadowConstants, params.pShadowConstants);
-    SamplerState samplerPoint       = SAMPLER_POINT_CLAMP;
-    Texture2D<float4> gbufferA      = GetTexture2DFloat4(params.gbufferA);
-    Texture2D<float4> gbufferB      = GetTexture2DFloat4(params.gbufferB);
-    Texture2D<float4> depthBuffer   = GetTexture2DFloat4(params.depthBuffer);
+    PerFrame frame                      = GetBufferConstants(PerFrame, params.pFrame);
+    ShadowConstants shadowConstants     = GetBufferConstants(ShadowConstants, params.pShadowConstants);
+    SamplerState samplerPoint           = SAMPLER_POINT_CLAMP;
+    Texture2D<float4> albedoMetallic    = GetTexture2DFloat4(params.gbufferAlbedoMetallic);
+    Texture2D<float4> normalRoughness   = GetTexture2DFloat4(params.gbufferNormalRoughness);
+    Texture2D<float4> depthBuffer       = GetTexture2DFloat4(params.depthBuffer);
 
     float2 uv = psIn.uv;
-    float4 sampleA = gbufferA.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Roughness
-    float4 sampleB = gbufferB.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Metallic
+    float4 sampleA = albedoMetallic.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Roughness
+    float4 sampleB = normalRoughness.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Metallic
     float depth = depthBuffer.Sample(samplerPoint, uv).r;
     if(depth == 0.0) return float4(0.0, 0.0, 0.0, 1.0);
 
@@ -226,7 +211,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     float3 L = normalize(-frame.mLight1.xyz);
     float3 N = DecodeNormal(sampleB.xy);
 
-    float3 worldPos = WorldPositionFromDepth(depth, uv, frame.mInvView, frame.mInvProj);
+    float3 worldPos = WorldPositionFromDepth(depth, uv, frame.mInvViewProj);
     float3 camPos = frame.mCamWorldPos.xyz;
 
     float3 V = normalize(camPos - worldPos);

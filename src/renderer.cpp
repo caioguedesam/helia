@@ -1,4 +1,5 @@
 #include "renderer.hpp"
+#include "../dw/src/math/random.hpp"
 #include "../dw/src/core/profile.hpp"
 #include "../dw/src/asset/asset.hpp"
 #include "../dw/src/render/render.hpp"
@@ -466,7 +467,9 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
         desc.mMipCount = 1;
-        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTAccum);
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTCurrentHDR);
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTPreviousHDR);
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTAccumulatedHDR);
         desc.mMipCount = BLOOM_STEPS + 1;
         desc.mFlags = RENDER_TARGET_FLAGS_SEPARATE_LEVELS;  // Render to mips directly during bloom pass
         initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTBloom);
@@ -519,9 +522,11 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mClear = {{0,0,0,0}};
         desc.mWidth =   pSceneRenderer->pApp->mWindow.mWidth;
         desc.mHeight =  pSceneRenderer->pApp->mWindow.mHeight;
-        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferA);
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferAlbedoMetallic);
         desc.mFormat = FORMAT_A2RGB10_UNORM;
-        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferB);
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferNormalRoughness);
+        desc.mFormat = FORMAT_RG16_SFLOAT;
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferVelocity);
     }
 
     // Final present RT
@@ -544,37 +549,25 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         submitImmediateCmd(pRenderer, pCmd);
     }
 
-    // Transitioning render targets so they can be bound to descriptor sets
+    // Preparing render targets so they can be properly used during render passes
     {
         CommandBuffer* pCmd = getCmd(pRenderer, COMMAND_BUFFER_TYPE_IMMEDIATE);
         beginCmd(pCmd);
 
-        RenderTargetBarrier barriers[4];
-        barriers[0] = {pSceneRenderer->pRTGBufferA,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[1] = {pSceneRenderer->pRTGBufferB,     IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[2] = {pSceneRenderer->pRTAccum,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        barriers[3] = {pSceneRenderer->pRTBloom,        IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL };
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
-
-        RenderTargetBarrier smBarriers[MAX_CASCADES];
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferAlbedoMetallic);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferNormalRoughness);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferVelocity);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTCurrentHDR);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTPreviousHDR);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTAccumulatedHDR);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTBloom);
         for(int i = 0; i < MAX_CASCADES; i++)
         {
-            smBarriers[i] = {pSceneRenderer->pRTShadows[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
+            cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTShadows[i]);
+            cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTShadowsResolved[i]);
         }
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(smBarriers), smBarriers);
-
-        for(int i = 0; i < MAX_CASCADES; i++)
-        {
-            smBarriers[i] = {pSceneRenderer->pRTShadowsResolved[i], IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL};
-        }
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(smBarriers), smBarriers);
-
-        RenderTargetBarrier depthBarriers[2] = 
-        {
-            {pSceneRenderer->pRTShadowsDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL},
-            {pSceneRenderer->pRTSceneDepth, IMAGE_LAYOUT_UNDEFINED, IMAGE_LAYOUT_GENERAL}
-        };
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(depthBarriers), depthBarriers);
+        cmdPrepareDepthTarget(pCmd, pSceneRenderer->pRTShadowsDepth);
+        cmdPrepareDepthTarget(pCmd, pSceneRenderer->pRTSceneDepth);
 
         endCmd(pCmd);
         submitImmediateCmd(pRenderer, pCmd);
@@ -594,6 +587,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     String debugShaderPath              = str("debug");
     String tonemappingShaderPath        = str("tone_mapping");
     String copyTextureShaderPath        = str("copy_texture");
+    String temporalResolveShaderPath    = str("temporal_resolve");
     String shadowMapDefines[]           = { str("SHADOW_MAP") };
     String doubleSidedDefines[]         = { str("DOUBLE_SIDED") };
 
@@ -644,6 +638,9 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
 
         {copyTextureShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSCopyTexture},
         {copyTextureShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSCopyTexture},
+
+        {temporalResolveShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSTemporalResolve},
+        {temporalResolveShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSTemporalResolve},
     };
 
     for(uint32 i = 0; i < ARR_LEN(shaders); i++)
@@ -733,9 +730,10 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     // GBuffer pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 2;
-        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferA->mDesc.mFormat;
-        desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferB->mDesc.mFormat;
+        desc.mRenderTargetCount = 3;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferAlbedoMetallic->mDesc.mFormat;
+        desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferNormalRoughness->mDesc.mFormat;
+        desc.mRenderTargetFormats[2] = pSceneRenderer->pRTGBufferVelocity->mDesc.mFormat;
         desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
@@ -806,7 +804,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         GraphicsPipelineDesc desc = {};
 
         desc.mRenderTargetCount = 1;
-        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccum->mDesc.mFormat;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTCurrentHDR->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
         desc.pVS = pSceneRenderer->pVSLighting;
@@ -860,7 +858,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         GraphicsPipelineDesc desc = {};
 
         desc.mRenderTargetCount = 1;
-        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccum->mDesc.mFormat;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccumulatedHDR->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLDebug;
         desc.pVS = pSceneRenderer->pVSDebug;
@@ -916,15 +914,38 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
 
         addPipeline(pRenderer, desc, &pSceneRenderer->pPipeCopyTextureB10G11R11);
     }
+
+    if(!pSceneRenderer->pPipeTemporalResolve)
+    {
+        GraphicsPipelineDesc desc = {};
+
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTAccumulatedHDR->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
+        desc.pVS = pSceneRenderer->pVSTemporalResolve;
+        desc.pFS = pSceneRenderer->pPSTemporalResolve;
+
+        desc.mCullMode = CULL_MODE_BACK;
+        desc.mFrontFace = FRONT_FACE_CCW;
+
+        desc.mDepthTest = false;
+        desc.mDepthWrite = false;
+
+        addPipeline(pRenderer, desc, &pSceneRenderer->pPipeTemporalResolve);
+    }
 }
 
 void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
 {
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTPresent);
-    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTAccum);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTCurrentHDR);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTPreviousHDR);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTAccumulatedHDR);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTBloom);
-    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferA);
-    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferB);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferAlbedoMetallic);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferNormalRoughness);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferVelocity);
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
         destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadows[i]);
@@ -966,6 +987,8 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         &pSceneRenderer->pPSTonemapping,
         &pSceneRenderer->pVSCopyTexture,
         &pSceneRenderer->pPSCopyTexture,
+        &pSceneRenderer->pVSTemporalResolve,
+        &pSceneRenderer->pPSTemporalResolve,
     };
 
     for(uint32 i = 0; i < ARR_LEN(shaders); i++)
@@ -1014,23 +1037,55 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeTonemapping);
     if(pSceneRenderer->pPipeCopyTextureB10G11R11)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeCopyTextureB10G11R11);
+    if(pSceneRenderer->pPipeTemporalResolve)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeTemporalResolve);
 }
 
-void updatePerFrameData(SceneRenderer* pSceneRenderer)
+void updatePerFrameData(SceneRenderer* pSceneRenderer, uint32 frame)
 {
+    // Jitter
+    uint32 w = pSceneRenderer->pApp->mWindow.mWidth;
+    uint32 h = pSceneRenderer->pApp->mWindow.mHeight;
+    v2f jitterOffset =
+    {
+        1.f / (2 * (float)w),
+        1.f / (2 * (float)h),
+    };
+    uint32 jitterFrame = frame % 8;
+    m4f jitter = translation({halton(2, jitterFrame) * jitterOffset.x, halton(3, jitterFrame) * jitterOffset.y, 0.f});
+
+    // Previous frame view-projection for temporal reprojection (needs to be unjittered)
+    pSceneRenderer->perFrameData.mPrevViewProjUnjitter = pSceneRenderer->perFrameData.mViewProjUnjitter;
+
     // Per frame constants
     m4f cameraView = getView(&pSceneRenderer->mCamera);
-    m4f cameraProj = getProj(&pSceneRenderer->mCamera);
+    m4f cameraProjUnjitter = getProj(&pSceneRenderer->mCamera);
+
+    m4f cameraProj = {};
+    if(pSceneRenderer->mEnableTAA)
+    {
+        cameraProj = matMul(cameraProjUnjitter, jitter);
+    }
+    else
+    {
+        cameraProj = cameraProjUnjitter;
+    }
+    
     pSceneRenderer->perFrameData.mView = cameraView;
     pSceneRenderer->perFrameData.mProj = cameraProj;
+    pSceneRenderer->perFrameData.mProjUnjitter = cameraProjUnjitter;
     pSceneRenderer->perFrameData.mViewProj = matMul(cameraProj, cameraView);
+    pSceneRenderer->perFrameData.mViewProjUnjitter = matMul(cameraProjUnjitter, cameraView);
     pSceneRenderer->perFrameData.mInvView = inverse(cameraView);
     pSceneRenderer->perFrameData.mInvProj = inverse(cameraProj);
+    pSceneRenderer->perFrameData.mInvProjUnjitter = inverse(cameraProjUnjitter);
+    pSceneRenderer->perFrameData.mInvViewProj = matMul(pSceneRenderer->perFrameData.mInvView, pSceneRenderer->perFrameData.mInvProj);
+    pSceneRenderer->perFrameData.mInvViewProjUnjitter = matMul(pSceneRenderer->perFrameData.mInvView, pSceneRenderer->perFrameData.mInvProjUnjitter);
     pSceneRenderer->perFrameData.mCamWorldPos = to4f(pSceneRenderer->mCamera.mPos, 1);
     if(!pSceneRenderer->mFreezeMainCam)
     {
-        pSceneRenderer->perFrameData.mMainView = cameraView;
-        pSceneRenderer->perFrameData.mMainProj = cameraProj;
+        pSceneRenderer->perFrameData.mCullView = cameraView;
+        pSceneRenderer->perFrameData.mCullProj = cameraProj;
     }
 
     float cascadeSplitDistances[MAX_CASCADES];
@@ -1418,6 +1473,9 @@ void addUIControls(SceneRenderer* pSceneRenderer)
                 0.f,
                 1.f);
 
+            uiSeparator(str("TAA"));
+            uiCheckbox(str("Enabled"), &pSceneRenderer->mEnableTAA);
+
             uiSeparator(str("Shadows"));
 
             String shadowModes[2] = {str("Regular"), str("MSM")};
@@ -1546,6 +1604,39 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
 #define RENDERER_SCOPE_BEGIN(NAME) cmdScopeBegin(pSceneRenderer->pRenderer, pCmd, str(NAME))
 #define RENDERER_SCOPE_END() cmdScopeEnd(pSceneRenderer->pRenderer, pCmd)
+
+void subpassCopyTargetR11G11B10(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, RenderTarget* pSrc, RenderTarget* pDst, uint32 mipLevel)
+{
+    RENDERER_SCOPE_BEGIN("Copy Target");
+
+    GraphicsPipeline* pPipeline = pSceneRenderer->pPipeCopyTextureB10G11R11;
+
+    cmdBindGraphicsPipeline(pCmd, pPipeline);
+    cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
+    cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
+
+    RenderTargetBarrier targetBarriers[2];
+    targetBarriers[0] = {pSrc, getImageLayout(pSrc), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    targetBarriers[1] = {pDst, getImageLayout(pDst), IMAGE_LAYOUT_COLOR_OUTPUT };
+    cmdRenderTargetBarrier(pCmd, ARR_LEN(targetBarriers), targetBarriers);
+
+    RenderTargetBindDesc bindDesc = {};
+    bindDesc.mColorCount = 1;
+    bindDesc.mColorBindings[0] = { pDst, LOAD_OP_CLEAR, STORE_OP_STORE, mipLevel };
+    cmdBindRenderTargets(pCmd, bindDesc);
+
+    cmdResetShaderConstants(pCmd);
+    cmdPushShaderConstant(pCmd, getHandle(pSrc));
+    cmdPushShaderConstant(pCmd, 0.f);
+    cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
+
+    cmdDrawIndexed(pCmd, 
+            3, 1, 0, 0);
+
+    cmdUnbindRenderTargets(pCmd);
+
+    RENDERER_SCOPE_END();
+}
 
 void passIssueDrawCalls(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, DrawCallIssuePass type, uint32 frame)
 {
@@ -1723,21 +1814,24 @@ void passPreDepth(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
 void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("G-Buffer Pass");
-    RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
-    RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
+    RenderTarget* pRTAlbedoMetallic = pSceneRenderer->pRTGBufferAlbedoMetallic;
+    RenderTarget* pRTNormalRoughness = pSceneRenderer->pRTGBufferNormalRoughness;
+    RenderTarget* pRTVelocity = pSceneRenderer->pRTGBufferVelocity;
     RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBuffer;
 
-    RenderTargetBarrier barriers[2];
-    barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_COLOR_OUTPUT };
-    barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_COLOR_OUTPUT };
+    RenderTargetBarrier barriers[3];
+    barriers[0] = {pRTAlbedoMetallic, getImageLayout(pRTAlbedoMetallic), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[1] = {pRTNormalRoughness, getImageLayout(pRTNormalRoughness), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[2] = {pRTVelocity, getImageLayout(pRTVelocity), IMAGE_LAYOUT_COLOR_OUTPUT };
     cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
     RenderTargetBindDesc bindDesc = {};
-    bindDesc.mColorCount = 2;
-    bindDesc.mColorBindings[0] = { pRTGBufferA, LOAD_OP_CLEAR, STORE_OP_STORE };
-    bindDesc.mColorBindings[1] = { pRTGBufferB, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorCount = 3;
+    bindDesc.mColorBindings[0] = { pRTAlbedoMetallic, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorBindings[1] = { pRTNormalRoughness, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorBindings[2] = { pRTVelocity, LOAD_OP_CLEAR, STORE_OP_STORE };
     bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_LOAD, STORE_OP_STORE };
     cmdBindRenderTargets(pCmd, bindDesc);
 
@@ -1770,23 +1864,23 @@ void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fram
 void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("Lighting Pass");
-    RenderTarget* pRTGBufferA = pSceneRenderer->pRTGBufferA;
-    RenderTarget* pRTGBufferB = pSceneRenderer->pRTGBufferB;
+    RenderTarget* pRTAlbedoMetallic = pSceneRenderer->pRTGBufferAlbedoMetallic;
+    RenderTarget* pRTNormalRoughness = pSceneRenderer->pRTGBufferNormalRoughness;
     RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
-    RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+    RenderTarget* pRTLighting = pSceneRenderer->pRTCurrentHDR;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;
 
     RenderTargetBarrier barriers[4];
-    barriers[0] = {pRTGBufferA, getImageLayout(pRTGBufferA), IMAGE_LAYOUT_SHADER_READ_ONLY };
-    barriers[1] = {pRTGBufferB, getImageLayout(pRTGBufferB), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    barriers[0] = {pRTAlbedoMetallic, getImageLayout(pRTAlbedoMetallic), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    barriers[1] = {pRTNormalRoughness, getImageLayout(pRTNormalRoughness), IMAGE_LAYOUT_SHADER_READ_ONLY };
     barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
-    barriers[3] = {pRTAccum, getImageLayout(pRTAccum), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[3] = {pRTLighting, getImageLayout(pRTLighting), IMAGE_LAYOUT_COLOR_OUTPUT };
     cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
     RenderTargetBindDesc bindDesc = {};
     bindDesc.mColorCount = 1;
-    bindDesc.mColorBindings[0] = { pRTAccum, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorBindings[0] = { pRTLighting, LOAD_OP_CLEAR, STORE_OP_STORE };
     cmdBindRenderTargets(pCmd, bindDesc);
 
     cmdBindGraphicsPipeline(pCmd, pPipeline);
@@ -1797,8 +1891,8 @@ void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
     cmdResetShaderConstants(pCmd);
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBPerFrame[frame]));
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBShadowConstants[frame]));
-    cmdPushShaderConstant(pCmd, getHandle(pRTGBufferA));
-    cmdPushShaderConstant(pCmd, getHandle(pRTGBufferB));
+    cmdPushShaderConstant(pCmd, getHandle(pRTAlbedoMetallic));
+    cmdPushShaderConstant(pCmd, getHandle(pRTNormalRoughness));
     cmdPushShaderConstant(pCmd, getHandle(pRTDepth));
     cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
 
@@ -1809,42 +1903,64 @@ void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
     RENDERER_SCOPE_END();
 }
 
+void passTemporalResolve(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
+{
+    if(!pSceneRenderer->mEnableTAA)
+    {
+        subpassCopyTargetR11G11B10(pCmd, pSceneRenderer, pSceneRenderer->pRTCurrentHDR, pSceneRenderer->pRTAccumulatedHDR);
+        return;
+    }
+
+    RENDERER_SCOPE_BEGIN("Temporal Resolve Pass");
+    RenderTarget* pRTCurr = pSceneRenderer->pRTCurrentHDR;
+    RenderTarget* pRTPrev = pSceneRenderer->pRTPreviousHDR;
+    RenderTarget* pRTVelocity = pSceneRenderer->pRTGBufferVelocity;
+    RenderTarget* pRTAccu = pSceneRenderer->pRTAccumulatedHDR;
+
+    GraphicsPipeline* pPipeline = pSceneRenderer->pPipeTemporalResolve;
+
+    RenderTargetBarrier barriers[] =
+    {
+        barriers[0] = {pRTCurr, getImageLayout(pRTCurr), IMAGE_LAYOUT_SHADER_READ_ONLY },
+        barriers[1] = {pRTPrev, getImageLayout(pRTPrev), IMAGE_LAYOUT_SHADER_READ_ONLY },
+        barriers[2] = {pRTVelocity, getImageLayout(pRTVelocity), IMAGE_LAYOUT_SHADER_READ_ONLY },
+        barriers[3] = {pRTAccu, getImageLayout(pRTAccu), IMAGE_LAYOUT_COLOR_OUTPUT }
+    };
+    cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+    RenderTargetBindDesc bindDesc = {};
+    bindDesc.mColorCount = 1;
+    bindDesc.mColorBindings[0] = { pRTAccu, LOAD_OP_CLEAR, STORE_OP_STORE };
+    cmdBindRenderTargets(pCmd, bindDesc);
+
+    cmdBindGraphicsPipeline(pCmd, pPipeline);
+
+    cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
+    cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
+
+    cmdResetShaderConstants(pCmd);
+    cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBPerFrame[frame]));
+    cmdPushShaderConstant(pCmd, getHandle(pRTCurr));
+    cmdPushShaderConstant(pCmd, getHandle(pRTPrev));
+    cmdPushShaderConstant(pCmd, getHandle(pRTVelocity));
+    cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pRTSceneDepth));
+    cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
+
+    cmdDrawIndexed(pCmd, 
+            3, 1, 0, 0);
+
+    cmdUnbindRenderTargets(pCmd);
+    RENDERER_SCOPE_END();
+
+    subpassCopyTargetR11G11B10(pCmd, pSceneRenderer, pSceneRenderer->pRTAccumulatedHDR, pSceneRenderer->pRTPreviousHDR);
+}
+
 void passBloom(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("Bloom Pass");
     // Copy HDR buffer to bloom buffer
-    {
-        RENDERER_SCOPE_BEGIN("Bloom Source Copy");
-
-        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeCopyTextureB10G11R11;
-
-        cmdBindGraphicsPipeline(pCmd, pPipeline);
-        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
-        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
-
-        RenderTargetBarrier targetBarriers[2];
-        targetBarriers[0] = {pSceneRenderer->pRTAccum, getImageLayout(pSceneRenderer->pRTAccum), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        targetBarriers[1] = {pSceneRenderer->pRTBloom, getImageLayout(pSceneRenderer->pRTBloom), IMAGE_LAYOUT_COLOR_OUTPUT };
-        cmdRenderTargetBarrier(pCmd, ARR_LEN(targetBarriers), targetBarriers);
-
-        RenderTargetBindDesc bindDesc = {};
-        bindDesc.mColorCount = 1;
-        bindDesc.mColorBindings[0] = { pSceneRenderer->pRTBloom, LOAD_OP_CLEAR, STORE_OP_STORE, 0 };
-        cmdBindRenderTargets(pCmd, bindDesc);
-
-        cmdResetShaderConstants(pCmd);
-        cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pRTAccum));
-        cmdPushShaderConstant(pCmd, 0.f);
-        cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
-
-        cmdDrawIndexed(pCmd, 
-                3, 1, 0, 0);
-
-        cmdUnbindRenderTargets(pCmd);
-
-        RENDERER_SCOPE_END();
-    }
-
+    subpassCopyTargetR11G11B10(pCmd, pSceneRenderer, pSceneRenderer->pRTAccumulatedHDR, pSceneRenderer->pRTBloom);
+    
     // Downsample
     {
         RENDERER_SCOPE_BEGIN("Bloom Downsample");
@@ -1946,13 +2062,13 @@ void passBloom(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("Debug Geometry");
-    RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+    RenderTarget* pRT = pSceneRenderer->pRTAccumulatedHDR;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDebug;
 
     RenderTargetBindDesc bindDesc = {};
     bindDesc.mColorCount = 1;
-    bindDesc.mColorBindings[0] = { pRTAccum, LOAD_OP_LOAD, STORE_OP_STORE };
+    bindDesc.mColorBindings[0] = { pRT, LOAD_OP_LOAD, STORE_OP_STORE };
     cmdBindRenderTargets(pCmd, bindDesc);
 
     cmdBindGraphicsPipeline(pCmd, pPipeline);
@@ -1972,7 +2088,7 @@ void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 void passTonemapping(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
 {
     RENDERER_SCOPE_BEGIN("Tone Mapping");
-    RenderTarget* pRTAccum = pSceneRenderer->pRTAccum;
+    RenderTarget* pRT = pSceneRenderer->pRTAccumulatedHDR;
     RenderTarget* pRTBloom = pSceneRenderer->pRTBloom;
     RenderTarget* pRTPresent = pSceneRenderer->pRTPresent;
     
@@ -1994,7 +2110,7 @@ void passTonemapping(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 
     
     cmdResetShaderConstants(pCmd);
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBPerFrame[frame]));
-    cmdPushShaderConstant(pCmd, getHandle(pRTAccum));
+    cmdPushShaderConstant(pCmd, getHandle(pRT));
     cmdPushShaderConstant(pCmd, getHandle(pRTBloom));
     cmdPushShaderConstant(pCmd, pSceneRenderer->mBloomSettings.mStrength);
     cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
@@ -2112,6 +2228,10 @@ void renderScene(SceneRenderer* pSceneRenderer, uint32 frame)
     // Lighting pass
     passLighting(pCmd, pSceneRenderer, activeFrame);
     GPU_TIMESTAMP("Lighting Pass");
+
+    // Temporal resolve pass
+    passTemporalResolve(pCmd, pSceneRenderer, activeFrame);
+    GPU_TIMESTAMP("Temporal Resolve Pass");
 
     // Bloom pass
     passBloom(pCmd, pSceneRenderer, activeFrame);
