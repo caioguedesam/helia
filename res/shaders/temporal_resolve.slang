@@ -7,6 +7,11 @@ struct Params
     uint prevBuffer;
     uint velocityBuffer;
     uint depthBuffer;
+
+    float texSizeX;
+    float texSizeY;
+    float texelSizeX;
+    float texelSizeY;
 };
 
 struct VSIn
@@ -46,10 +51,24 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     float3 currColor = currTarget.Sample(samplerLinear, uv).rgb;
     float2 velocity = velocityBuffer.Sample(samplerPoint, uv).rg;
     float2 prevUV = uv - velocity;
-    float3 prevColor = prevTarget.Sample(samplerLinear, prevUV).rgb;
+    float3 prevColor = SampleTextureCatmullRom5(prevTarget, samplerLinear, prevUV, float2(params.texSizeX, params.texSizeY)).rgb;
     // TODO(caio): Leaving this commented to deal with NaN/Inf problems in lighting pass later
     //-if(any(isnan(prevColor)) || any(isinf(prevColor)))
     //-    prevColor = currColor;
+
+    // Color clamping
+    float3 minColor = 9999.0; float3 maxColor = -9999.0;
+    for(int x = -1; x <= 1; x++)
+    {
+        for(int y = -1; y <= 1; y++)
+        {
+            float3 color = currTarget.Sample(samplerPoint, uv + float2(x * params.texelSizeX, y * params.texelSizeY)).rgb;
+            minColor = min(minColor, color);
+            maxColor = max(maxColor, color);
+        }
+    }
+
+    prevColor = clamp(prevColor, minColor, maxColor);
 
     float3 result = lerp(prevColor, currColor, 0.1);
 

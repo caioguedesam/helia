@@ -1938,12 +1938,21 @@ void passTemporalResolve(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uin
     cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
     cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
 
+    float texSizeX = (float)pRTCurr->mDesc.mWidth;
+    float texSizeY = (float)pRTCurr->mDesc.mHeight;
+    float texelSizeX = 1.f / texSizeX;
+    float texelSizeY = 1.f / texSizeY;
+
     cmdResetShaderConstants(pCmd);
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBPerFrame[frame]));
     cmdPushShaderConstant(pCmd, getHandle(pRTCurr));
     cmdPushShaderConstant(pCmd, getHandle(pRTPrev));
     cmdPushShaderConstant(pCmd, getHandle(pRTVelocity));
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pRTSceneDepth));
+    cmdPushShaderConstant(pCmd, texSizeX);
+    cmdPushShaderConstant(pCmd, texSizeY);
+    cmdPushShaderConstant(pCmd, texelSizeX);
+    cmdPushShaderConstant(pCmd, texelSizeY);
     cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
 
     cmdDrawIndexed(pCmd, 

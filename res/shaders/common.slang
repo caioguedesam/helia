@@ -159,6 +159,41 @@ float3 WorldPositionFromDepth(float z, float2 uv, float4x4 mInvViewProj)
     return worldPos.xyz / worldPos.w;
 }
 
+float4 SampleTextureCatmullRom5(Texture2D<float4> tex, SamplerState bilinearSampler, float2 uv, float2 texSize)
+{
+    float2 texel = uv * texSize;
+    float2 idx = floor(texel - 0.5) + 0.5;
+    float2 f = texel - idx;
+
+    // Catmull-Rom weight functions
+    float2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    float2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    float2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    float2 w3 = f * f * (-0.5 + 0.5 * f);
+
+    float2 w12 = w1 + w2;
+
+    float2 offset0 = idx - 1.0;
+    float2 offset3 = idx + 2.0;
+    float2 offset12 = idx + w2 / w12;
+
+    float2 invTexSize = 1.0 / texSize;
+
+    float4 sampleCenter = tex.SampleLevel(bilinearSampler, float2(offset12.x, offset12.y) * invTexSize, 0.0);
+    float4 sampleLeft   = tex.SampleLevel(bilinearSampler, float2(offset0.x,  offset12.y) * invTexSize, 0.0);
+    float4 sampleRight  = tex.SampleLevel(bilinearSampler, float2(offset3.x,  offset12.y) * invTexSize, 0.0);
+    float4 sampleTop    = tex.SampleLevel(bilinearSampler, float2(offset12.x, offset0.y)  * invTexSize, 0.0);
+    float4 sampleBottom = tex.SampleLevel(bilinearSampler, float2(offset12.x, offset3.y)  * invTexSize, 0.0);
+    
+    float4 color = sampleCenter * (w12.x * w12.y) +
+                   sampleLeft   * (w0.x  * w12.y) +
+                   sampleRight  * (w3.x  * w12.y) +
+                   sampleTop    * (w12.x * w0.y)  +
+                   sampleBottom * (w12.x * w3.y);
+
+    return color;
+}
+
 #define BINDING(SET, SPACE) [[vk::binding(SPACE, SET)]]
 
 struct BufferAddressTable
