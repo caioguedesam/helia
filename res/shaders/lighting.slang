@@ -257,6 +257,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 
     // Directional lighting
     result.rgb += BRDF * NoL * intensity * lightColor * shadowVisibility; 
+    //result.rgb += BRDF * NoL * intensity * lightColor; 
 
     return result;
 }

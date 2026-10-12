@@ -53,6 +53,7 @@ struct MaterialTextureInfo
 
 struct Scene
 {
+    uint32 mModelId = 0;
     Arena mArena = {};
     Arena mTempArena = {};
 
@@ -73,7 +74,7 @@ struct Scene
     uint32 mTexCount = 0;
 };
 
-void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize);
+void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize, uint32 modelId);
 void destroyScene(Scene* pScene);
 
 void setupSceneModel(Scene* pScene, String modelPath);

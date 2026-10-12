@@ -10,13 +10,15 @@
 #define CGLTF_IMPLEMENTATION
 #include "third_party/cgltf.h"
 
-void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize)
+void initScene(Scene* pScene, uint64 arenaSize, uint64 stagingSize, uint32 modelId)
 {
     ASSERT(pScene);
     *pScene = {};
 
     initArena(arenaSize, &pScene->mArena);
     initArena(stagingSize, &pScene->mTempArena);
+
+    pScene->mModelId = modelId;
 }
 
 void destroyScene(Scene* pScene)

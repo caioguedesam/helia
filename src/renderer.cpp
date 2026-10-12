@@ -258,6 +258,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         vbDesc.mSize = MAX_DEBUG_VERTS;
         vbDesc.mCount = MAX_DEBUG_VERTS / 6;
         vbDesc.mStride = sizeof(float);     // Should this be * 6?
+        vbDesc.mFlags = BUFFER_FLAGS_HOST_MAPPED;
         for(uint32 i = 0; i < CONCURRENT_FRAMES; i++)
         {
             initBuffer(pResMan, vbDesc, &pSceneRenderer->pVBDebug[i]);
@@ -2074,6 +2075,9 @@ void passDebug(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 frame)
     RenderTarget* pRT = pSceneRenderer->pRTAccumulatedHDR;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeDebug;
+
+    RenderTargetBarrier targetBarrier = {pRT, getImageLayout(pRT, 0), IMAGE_LAYOUT_COLOR_OUTPUT, 0, 1};
+    cmdRenderTargetBarrier(pCmd, 1, &targetBarrier);
 
     RenderTargetBindDesc bindDesc = {};
     bindDesc.mColorCount = 1;

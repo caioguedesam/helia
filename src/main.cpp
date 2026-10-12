@@ -24,6 +24,21 @@ UIState gUI;
 
 uint32 gFrame = 0;
 
+// TODO(caio): Move these to scene so current model can be changed via UI
+String gModelPaths[] =
+{
+    str("../../res/models/sponza/glTF/Sponza.gltf"),
+    str("../../res/models/metal_rough_spheres/MetalRoughSpheres.gltf"),
+    str("../../res/models/helmet/DamagedHelmet.gltf"),
+};
+String gModelNames[] =
+{
+    str("Sponza"),
+    str("Metal Roughness Spheres"),
+    str("Helmet"),
+};
+uint32 gCurrentModel = 1;
+
 // Helia
 Scene gScene = {};
 SceneRenderer gSceneRenderer = {};
@@ -68,17 +83,47 @@ void removePipelines()
     removeScenePipelines(&gSceneRenderer);
 }
 
-void init()
+void loadScene(uint32 modelId)
 {
-    initApp(APP_WIDTH, APP_HEIGHT, "DW App", &gApp);
     AssetManagerDesc assetManagerDesc;
     assetManagerDesc.mPermanentArenaSize = GB(1);
     assetManagerDesc.mTempArenaSize = MB(128);
     initAssetManager(assetManagerDesc, &gAssetManager);
 
+    initScene(&gScene, MB(512), MB(128), gCurrentModel);
+    String texPaths[SCENE_MAX_TEXTURES];
+    uint32 texCount = 0;
+    setupSceneModel(&gScene, gModelPaths[modelId]);
+    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gUI, &gScene, 
+            getFileDir(gModelPaths[modelId]));
+
+    addRenderTargets();
+    addShaders();
+    addResources();
+    addPipelines();
+}
+
+void unloadScene()
+{
+    removePipelines();
+    removeResources();
+    removeShaders();
+    removeRenderTargets();
+
+    destroySceneRenderer(&gSceneRenderer);
+    destroyScene(&gScene);
+
+    destroyAssetManager(&gAssetManager);
+}
+
+void init()
+{
+    initApp(APP_WIDTH, APP_HEIGHT, "DW App", &gApp);
+
     RendererDesc rendererDesc = {};
     rendererDesc.pApp = &gApp;
     initRenderer(rendererDesc, &gRenderer);
+    initShaderCompiler();
 
     UIDesc uiDesc = {};
     uiDesc.pApp = &gApp;
@@ -86,38 +131,18 @@ void init()
     uiDesc.mTargetFormat = FORMAT_RGBA8_UNORM;
     initUI(uiDesc, &gUI);
 
-    // Helia
-    initScene(&gScene, MB(512), MB(128));
-    String texPaths[SCENE_MAX_TEXTURES];
-    uint32 texCount = 0;
-    String modelPath = str("../../res/models/sponza/glTF/Sponza.gltf");
-    setupSceneModel(&gScene, modelPath);
-    initSceneRenderer(&gSceneRenderer, &gApp, &gRenderer, &gAssetManager, &gUI, &gScene, 
-            getFileDir(modelPath));
-
-    initShaderCompiler();
-    addRenderTargets();
-    addShaders();
-    addResources();
-    addPipelines();
+    loadScene(gCurrentModel);
 }
 
 void shutdown()
 {
     waitForCommands(&gRenderer);
 
-    removePipelines();
-    removeResources();
-    removeShaders();
-    removeRenderTargets();
-    destroyShaderCompiler();
-
-    destroySceneRenderer(&gSceneRenderer);
-    destroyScene(&gScene);
+    unloadScene(); 
 
     destroyUI(&gUI);
+    destroyShaderCompiler();
     destroyRenderer(&gRenderer);
-    destroyAssetManager(&gAssetManager);
     destroyApp(&gApp);
 }
 
@@ -127,6 +152,11 @@ void update()
     if(isJustDown(&gApp.mKeys, KEY_R))
     {
         addLoadRequest(&gApp, LOAD_REQUEST_SHADER);
+    }
+
+    if(isJustDown(&gApp.mKeys, KEY_O))
+    {
+        addLoadRequest(&gApp, LOAD_REQUEST_SCENE);
     }
 
     if(isJustDown(&gApp.mKeys, KEY_F))
@@ -209,6 +239,14 @@ void processLoadRequests(App* pApp)
         addResources();
         addPipelines();
         removeLoadRequest(&gApp, LOAD_REQUEST_SHADER);
+    }
+    if(pApp->mLoadRequests & LOAD_REQUEST_SCENE)
+    {
+        LOG("Reloading scene...");
+
+        unloadScene();
+        loadScene(gCurrentModel);
+        removeLoadRequest(&gApp, LOAD_REQUEST_SCENE);
     }
 }
 
