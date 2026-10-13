@@ -16,28 +16,22 @@
 #include "dw/src/render/timings.hpp"
 #include "src/draw_buffers.hpp"
 
-void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances)
+void getCascadeDistancesAbsolute(SceneRenderer* pSceneRenderer, float* pDistances)
 {
-    // https://developer.nvidia.com/gpugems/gpugems3/part-ii-light-and-shadows/chapter-10-parallel-split-shadow-maps-programmable-gpus
+    Camera cam = pSceneRenderer->mCamera;
 
-    float zNear = pCam->mDesc.mNear;
-    float zFar = pCam->mDesc.mFar;
+    float zFar  = cam.mDesc.mFar;
 
-    float lambda = pSceneRenderer->shadowConstants.kSplitFactor;
-
-    // Distances are stored as far plane for respective cascade.
-    // Near for cascade n is far for cascade n-1.
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
-        float cLog = zNear * powf((zFar / zNear), (float)(i + 1) / MAX_CASCADES);
-        float cLin = zNear + ((zFar - zNear) * (float)(i + 1) / MAX_CASCADES);
-        pDistances[i] = lambda * cLog + (1.f - lambda) * cLin;
+        pDistances[i] = pSceneRenderer->mCascadeDistances[i] * zFar;
     }
 }
 
-m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade)
+m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade, float* pOutRadius)
 {
     ASSERT(cascade < MAX_CASCADES);
+    ASSERT(pOutRadius);
 
     // Make cascade sub-frustum from main camera frustum
     Camera cascadeCam;
@@ -98,6 +92,7 @@ m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDist
     m4f frustumView = lookAtViewRH(frustumEye, frustumCenter, {0,1,0});
     m4f frustumProj = orthoRH(-radius, radius, -radius, radius, -radius * 6.f, radius * 6.f);
 
+    *pOutRadius = radius;
     return matMul(frustumProj, frustumView);
 }
 
@@ -414,7 +409,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     light.mIntensity = 1.f;
     light.mColor = {1,1,1};
     pSceneRenderer->mDirLight = light;
-    pSceneRenderer->mAmbient = 0.05f;
+    pSceneRenderer->mAmbient = 0.0f;
 
     pSceneRenderer->mDebugVerts = array<float>(pAppArena, MAX_DEBUG_VERTS);
 
@@ -502,17 +497,17 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         desc.mMipCount = 1;
         //desc.mFlags = RENDER_TARGET_FLAGS_SEPARATE_LEVELS;
 
-        desc.mSampleCount = MSAA_SAMPLES;
-        desc.mFormat = FORMAT_D16_UNORM;
+        desc.mSampleCount = SHADOW_MSAA_SAMPLES;
+        //desc.mFormat = FORMAT_D16_UNORM;
+        desc.mFormat = FORMAT_D32_SFLOAT;
         initDepthTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTShadowsDepth);
+        desc.mSampleCount = 1;
+        initDepthTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTShadowsDepthResolved);
+        desc.mFormat = FORMAT_RGBA32_SFLOAT;
 
         for(int32 i = 0; i < MAX_CASCADES; i++)
         {
-            desc.mSampleCount = MSAA_SAMPLES;
-            desc.mFormat = FORMAT_RGBA32_SFLOAT;
-            initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTShadows[i]);
-            desc.mSampleCount = 1;
-            initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTShadowsResolved[i]);
+            initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTShadowMoments[i]);
         }
     }
 
@@ -564,10 +559,10 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTBloom);
         for(int i = 0; i < MAX_CASCADES; i++)
         {
-            cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTShadows[i]);
-            cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTShadowsResolved[i]);
+            cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTShadowMoments[i]);
         }
         cmdPrepareDepthTarget(pCmd, pSceneRenderer->pRTShadowsDepth);
+        cmdPrepareDepthTarget(pCmd, pSceneRenderer->pRTShadowsDepthResolved);
         cmdPrepareDepthTarget(pCmd, pSceneRenderer->pRTSceneDepth);
 
         endCmd(pCmd);
@@ -583,6 +578,7 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
     String bloomUpsampleShaderPath      = str("bloom_upsample");
     String depthPrepassShaderPath       = str("depth_prepass");
     String shadowPassShaderPath         = str("shadow_map_pass");
+    String msmShaderPath                = str("msm");
     String gbufferShaderPath            = str("gbuffer");
     String lightingShaderPath           = str("lighting");
     String debugShaderPath              = str("debug");
@@ -612,6 +608,9 @@ void addSceneShaders(SceneRenderer* pSceneRenderer)
         {shadowPassShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSShadowMapPass},
         {shadowPassShaderPath, SHADER_TYPE_VERT, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pVSShadowMapPassDoubleSided},
         {shadowPassShaderPath, SHADER_TYPE_FRAG, doubleSidedDefines, ARR_LEN(doubleSidedDefines), &pSceneRenderer->pPSShadowMapPassDoubleSided},
+
+        {msmShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSMSM},
+        {msmShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSMSM},
 
         {gbufferShaderPath, SHADER_TYPE_VERT, NULL, 0, &pSceneRenderer->pVSGBuffer},
         {gbufferShaderPath, SHADER_TYPE_FRAG, NULL, 0, &pSceneRenderer->pPSGBuffer},
@@ -666,8 +665,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     // Shadow pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 1;
-        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTShadows[0]->mDesc.mFormat;
+        desc.mRenderTargetCount = 0;
         desc.mDepthTargetFormat = pSceneRenderer->pRTShadowsDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
@@ -677,7 +675,7 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         desc.mCullMode = CULL_MODE_BACK;
         desc.mFrontFace = FRONT_FACE_CCW;
         
-        desc.mSampleCount = MSAA_SAMPLES;
+        desc.mSampleCount = SHADOW_MSAA_SAMPLES;
 
         desc.mDepthTest = true;
         desc.mDepthWrite = true;
@@ -695,6 +693,25 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
         {
             addPipeline(pRenderer, desc, &pSceneRenderer->pPipeShadowMapPassDoubleSided);
         }
+    }
+
+    // Shadow map to MSM pipeline
+    {
+        GraphicsPipelineDesc desc = {};
+        desc.mRenderTargetCount = 1;
+        desc.mRenderTargetFormats[0] = pSceneRenderer->pRTShadowMoments[0]->mDesc.mFormat;
+
+        desc.mVertexLayout = pSceneRenderer->mVLScreenQuad;
+        desc.pVS = pSceneRenderer->pVSMSM;
+        desc.pFS = pSceneRenderer->pPSMSM;
+
+        desc.mCullMode = CULL_MODE_BACK;
+        desc.mFrontFace = FRONT_FACE_CCW;
+
+        desc.mDepthTest = false;
+        desc.mDepthWrite = false;
+
+        addPipeline(pRenderer, desc, &pSceneRenderer->pPipeMSM);
     }
 
     // Depth pre-pass pipeline
@@ -947,14 +964,14 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferAlbedoMetallic);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferNormalRoughness);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferVelocity);
-    for(int32 i = 0; i < MAX_CASCADES; i++)
-    {
-        destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadows[i]);
-        destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadowsResolved[i]);
-    }
 
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTSceneDepth);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadowsDepth);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadowsDepthResolved);
+    for(int32 i = 0; i < MAX_CASCADES; i++)
+    {
+        destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTShadowMoments[i]);
+    }
 }
 
 void removeSceneShaders(SceneRenderer* pSceneRenderer)
@@ -965,6 +982,8 @@ void removeSceneShaders(SceneRenderer* pSceneRenderer)
         &pSceneRenderer->pPSShadowMapPass,
         &pSceneRenderer->pVSShadowMapPassDoubleSided,
         &pSceneRenderer->pPSShadowMapPassDoubleSided,
+        &pSceneRenderer->pVSMSM,
+        &pSceneRenderer->pPSMSM,
         &pSceneRenderer->pVSDepthPrePass,
         &pSceneRenderer->pPSDepthPrePass,
         &pSceneRenderer->pVSDepthPrePassDoubleSided,
@@ -1012,6 +1031,8 @@ void removeScenePipelines(SceneRenderer* pSceneRenderer)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeShadowMapPass);
     if(pSceneRenderer->pPipeShadowMapPassDoubleSided)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeShadowMapPassDoubleSided);
+    if(pSceneRenderer->pPipeMSM)
+        removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeMSM);
     if(pSceneRenderer->pPipeDepthPrePass)
         removePipeline(pSceneRenderer->pRenderer, &pSceneRenderer->pPipeDepthPrePass);
     if(pSceneRenderer->pPipeDepthPrePassDoubleSided)
@@ -1090,11 +1111,13 @@ void updatePerFrameData(SceneRenderer* pSceneRenderer, uint32 frame)
     }
 
     float cascadeSplitDistances[MAX_CASCADES];
-    getCascadeDistances(pSceneRenderer, &pSceneRenderer->mCamera, cascadeSplitDistances);
+    getCascadeDistancesAbsolute(pSceneRenderer, cascadeSplitDistances);
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
-        m4f cascadeViewProj = getCascadeViewProj(pSceneRenderer, &pSceneRenderer->mCamera, cascadeSplitDistances, i);
+        float radius = 0.f;
+        m4f cascadeViewProj = getCascadeViewProj(pSceneRenderer, &pSceneRenderer->mCamera, cascadeSplitDistances, i, &radius);
         pSceneRenderer->perFrameData.mShadowCascadesViewProj[i] = cascadeViewProj;
+        pSceneRenderer->perFrameData.mShadowTexelWorldSizes[i] = (2.f * radius / (float)SHADOW_MAP_SIZE);
     }
 
     DirectionalLight light = pSceneRenderer->mDirLight;
@@ -1103,17 +1126,11 @@ void updatePerFrameData(SceneRenderer* pSceneRenderer, uint32 frame)
 
     memcpy(pSceneRenderer->perFrameData.mShadowCascadeDistances.mData, cascadeSplitDistances, MAX_CASCADES * sizeof(float));
 
-    // Shadow constants
-    // TODO(caio): Control shadow data here
-
     // Target handles
     ResourceManager* pResMan = &pSceneRenderer->mResMan;
     for(int32 i = 0; i < MAX_CASCADES; i++)
     {
-        if(MSAA_SAMPLES > 1)
-            pSceneRenderer->perFrameData.mHandleShadowMaps[i] = getHandle(pSceneRenderer->pRTShadowsResolved[i]->pTexture);
-        else
-            pSceneRenderer->perFrameData.mHandleShadowMaps[i] = getHandle(pSceneRenderer->pRTShadows[i]->pTexture);
+        pSceneRenderer->perFrameData.mHandleShadowMaps[i] = getHandle(pSceneRenderer->pRTShadowMoments[i]->pTexture);
     }
     for(int32 i = 0; i < pSceneRenderer->pRTSceneDepth->mDesc.mMipCount; i++)
     {
@@ -1361,6 +1378,7 @@ void debugGeometryEnd(SceneRenderer* pSceneRenderer)
             debugAddVector(pSceneRenderer, {0,0,0}, {1,0,0}, {1,0,0});
             debugAddVector(pSceneRenderer, {0,0,0}, {0,1,0}, {0,1,0});
             debugAddVector(pSceneRenderer, {0,0,0}, {0,0,1}, {0,0,1});
+            debugAddVector(pSceneRenderer, {0,0,0}, pSceneRenderer->mDirLight.mDir, {1,1,1});
         }
 
         // Insert debug visualizations with frozen camera here!
@@ -1477,33 +1495,19 @@ void addUIControls(SceneRenderer* pSceneRenderer)
             uiSeparator(str("TAA"));
             uiCheckbox(str("Enabled"), &pSceneRenderer->mEnableTAA);
 
-            uiSeparator(str("Shadows"));
-
-            String shadowModes[2] = {str("Regular"), str("MSM")};
-            int shadowMode = pSceneRenderer->shadowConstants.mShadowMode;
-            uiCombo(str("Mode"), &shadowMode, shadowModes, 2);
-            pSceneRenderer->shadowConstants.mShadowMode = shadowMode;
+            uiSeparator(str("Shadow Controls"));
 
             uiSliderf(
                 str("Depth Bias"),
                 &pSceneRenderer->shadowConstants.mDepthBias,
-                -1.f,
+                0.f,
                 1.f);
 
-            if(shadowMode == SHADOW_MODE_MSM)
-            {
-                uiSliderf(
-                    str("Moment Bias"),
-                    &pSceneRenderer->shadowConstants.mMomentBias,
-                    0.f,
-                    1.f);
-
-                uiSliderf(
-                    str("Filter Radius"),
-                    &pSceneRenderer->shadowConstants.mFilterRadius,
-                    0.f,
-                    10.f);
-            }
+            uiSliderf(
+                str("Moment Bias"),
+                &pSceneRenderer->shadowConstants.mMomentBias,
+                0.f,
+                1.f);
 
             uiSliderf(
                 str("Light Bleeding Reduction"),
@@ -1512,29 +1516,10 @@ void addUIControls(SceneRenderer* pSceneRenderer)
                 1.f);
 
             uiSliderf(
-                str("Cascade Split Factor"),
-                &pSceneRenderer->shadowConstants.kSplitFactor,
-                0.f,
-                1.f);
-
-            // Show the actual cascade boundaries.
-            float cascadeDistances[MAX_CASCADES];
-            getCascadeDistances(
-                pSceneRenderer,
-                &pSceneRenderer->mCamera,
-                cascadeDistances);
-
-            uiSeparator(str("Cascade Distances"));
-
-            for(int32 i = 0; i < MAX_CASCADES; ++i)
-            {
-                char label[64];
-                strf(label, "Cascade %d", i);
-
-                uiInputf(
-                    str(label),
-                    &cascadeDistances[i]);
-            }
+                str("Normal Bias"),
+                &pSceneRenderer->shadowConstants.mNormalBias,
+                -10.f,
+                10.f);
 
             uiEndTab();
         }
@@ -1548,6 +1533,8 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
         if(uiStartTab(str("Shadows")))
         {
+            
+
             uiSeparator(str("Cascade Shadow Maps"));
 
             // Two cascades per row.
@@ -1561,7 +1548,7 @@ void addUIControls(SceneRenderer* pSceneRenderer)
                 uiText(str(label));
 
                 Texture* pTex =
-                    pSceneRenderer->pRTShadows[i]->pTexture;
+                    pSceneRenderer->pRTShadowMoments[i]->pTexture;
 
                 uiImage(
                     pSceneRenderer->pUI,
@@ -1578,20 +1565,16 @@ void addUIControls(SceneRenderer* pSceneRenderer)
 
             uiSeparator(str("Cascade Information"));
 
-            float cascadeDistances[MAX_CASCADES];
-            getCascadeDistances(
-                pSceneRenderer,
-                &pSceneRenderer->mCamera,
-                cascadeDistances);
-
             for(int32 i = 0; i < MAX_CASCADES; ++i)
             {
                 char label[64];
                 strf(label, "Cascade %d", i);
 
+                float distance = pSceneRenderer->mCascadeDistances[i];
                 uiInputf(
                     str(label),
-                    &cascadeDistances[i]);
+                    &distance);
+                pSceneRenderer->mCascadeDistances[i] = distance;
             }
 
             uiEndTab();
@@ -1682,25 +1665,26 @@ void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fr
     barrier.mDstAccess = MEMORY_ACCESS_INDIRECT_READ;
     cmdBarrier(pCmd, 1, &barrier);
 
+    RenderTarget* pShadowDepthMap = pSceneRenderer->pRTShadowsDepth;
+    RenderTarget* pShadowDepthMapResolve = pSceneRenderer->pRTShadowsDepthResolved;
+
+    GraphicsPipeline* pShadowPipeline = pSceneRenderer->pPipeShadowMapPass;
+    GraphicsPipeline* pMSMPipeline = pSceneRenderer->pPipeMSM;
+
     for(uint32 i = 0; i < MAX_CASCADES; i++)
     {
-        RenderTarget* pRT = pSceneRenderer->pRTShadows[i];
-        RenderTarget* pRTResolve = pSceneRenderer->pRTShadowsResolved[i];
-        RenderTarget* pRTDepth = pSceneRenderer->pRTShadowsDepth;
-        RenderTargetBarrier barriers[3];
-        barriers[0] = {pRT, getImageLayout(pRT), IMAGE_LAYOUT_COLOR_OUTPUT };
-        barriers[1] = {pRTResolve, getImageLayout(pRTResolve), IMAGE_LAYOUT_COLOR_OUTPUT };
-        barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        // Depth render pass for cascade
+        RenderTargetBarrier barriers[2];
+        barriers[0] = {pShadowDepthMap, getImageLayout(pShadowDepthMap), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
+        barriers[1] = {pShadowDepthMapResolve, getImageLayout(pShadowDepthMapResolve), IMAGE_LAYOUT_DEPTH_STENCIL_OUTPUT };
         cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
         RenderTargetBindDesc bindDesc = {};
-        bindDesc.mColorCount = 1;
-        bindDesc.mColorBindings[0] = { pRT, LOAD_OP_CLEAR, STORE_OP_STORE, 0, pRTResolve };
-        bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_CLEAR, STORE_OP_DONT_CARE };
+        bindDesc.mColorCount = 0;
+        bindDesc.mDepthBinding = { pShadowDepthMap, LOAD_OP_CLEAR, STORE_OP_STORE, 0, pShadowDepthMapResolve, RESOLVE_AVERAGE };
         cmdBindRenderTargets(pCmd, bindDesc);
 
-        GraphicsPipeline* pPipeline = pSceneRenderer->pPipeShadowMapPass;
-        cmdBindGraphicsPipeline(pCmd, pPipeline);
+        cmdBindGraphicsPipeline(pCmd, pShadowPipeline);
 
         cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBSceneGeometry);
         cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBSceneGeometry);
@@ -1719,9 +1703,33 @@ void passShadowMap(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fr
 
         cmdUnbindRenderTargets(pCmd);
 
-        barriers[0] = {pRT, getImageLayout(pRT), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        barriers[1] = {pRTResolve, getImageLayout(pRTResolve), IMAGE_LAYOUT_SHADER_READ_ONLY };
-        cmdRenderTargetBarrier(pCmd, 2, barriers);
+        // Convert depth shadow map to MSM before rendering next cascade
+        RenderTarget* pMSM = pSceneRenderer->pRTShadowMoments[i];
+        barriers[0] = {pShadowDepthMapResolve, getImageLayout(pShadowDepthMapResolve), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        barriers[1] = {pMSM, getImageLayout(pMSM), IMAGE_LAYOUT_COLOR_OUTPUT };
+        cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
+
+        bindDesc = {};
+        bindDesc.mColorCount = 1;
+        bindDesc.mColorBindings[0] = { pMSM, LOAD_OP_CLEAR, STORE_OP_STORE };
+        cmdBindRenderTargets(pCmd, bindDesc);
+
+        cmdBindGraphicsPipeline(pCmd, pMSMPipeline);
+
+        cmdBindVertexBuffer(pCmd, pSceneRenderer->pVBScreenQuad);
+        cmdBindIndexBuffer(pCmd, pSceneRenderer->pIBScreenQuad);
+
+        cmdResetShaderConstants(pCmd);
+        cmdPushShaderConstant(pCmd, getHandle(pShadowDepthMapResolve));
+        cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
+        
+        cmdDrawIndexed(pCmd, 
+            3, 1, 0, 0);
+
+        cmdUnbindRenderTargets(pCmd);
+
+        barriers[0] = {pMSM, getImageLayout(pMSM), IMAGE_LAYOUT_SHADER_READ_ONLY };
+        cmdRenderTargetBarrier(pCmd, 1, barriers);
     }
     RENDERER_SCOPE_END();
 }

@@ -40,33 +40,22 @@ uint GetCascadeIndex(PerFrame frame, float3 worldPos)
     return cascade;
 }
 
-// Change moments from reverse z to regular z
-float4 FlipMoments(float4 m)
-{
-    return float4(
-        1.0 - m.x,
-        1.0 - 2.0*m.x + m.y,
-        1.0 - 3.0*m.x + 3.0*m.y - m.z,
-        1.0 - 4.0*m.x + 6.0*m.y - 4.0*m.z + m.w);
-}
 
-float MSMGetShadowVisibility(float4 momentsReverseZ, float fragmentDepth, float depthBias, float momentBias)
+float MSMGetShadowVisibility(float4 moments, float fragmentDepth, float depthBias, float momentBias)
 {
     // Based on MJP's Moment Shadow Mapping implementation:
     // https://github.com/TheRealMJP/Shadows/blob/master/Shadows/MSM.hlsl
 
     // Bias input data to avoid artifacts
-    float4 moments = FlipMoments(momentsReverseZ);
     float4 b = lerp(moments, float4(0.5f, 0.5f, 0.5f, 0.5f), momentBias);
     float3 z;
-    //z[0] = fragmentDepth - depthBias;
-    z[0] = (1.0 - fragmentDepth) - depthBias;
+    z[0] = fragmentDepth - depthBias;
 
     // Compute a Cholesky factorization of the Hankel matrix B storing only non-
     // trivial entries or related products
-    float L32D22 = (-b[0] * b[1]) + b[2];
-    float D22 = (-b[0] * b[0]) + b[1];
-    float squaredDepthVariance = (-b[1] * b[1]) + b[3];
+    float L32D22 = mad(-b[0], b[1], b[2]);
+    float D22 = mad(-b[0], b[0], b[1]);
+    float squaredDepthVariance = mad(-b[1], b[1], b[3]);
     float D33D22 = dot(float2(squaredDepthVariance, -L32D22), float2(D22, L32D22));
     float InvD22 = 1.0f / D22;
     float L32 = L32D22 * InvD22;
@@ -91,12 +80,11 @@ float MSMGetShadowVisibility(float4 momentsReverseZ, float fragmentDepth, float 
     float p = c[1] / c[2];
     float q = c[0] / c[2];
     float D = (p * p * 0.25f) - q;
-    float r = sqrt(max(D, 0.0f));
+    float r = sqrt(D);
     z[1] =- p * 0.5f - r;
     z[2] =- p * 0.5f + r;
 
     // Compute the shadow intensity by summing the appropriate weights
-    // Taking reverse Z into account as well.
     float4 switchVal = (z[2] < z[0]) ? float4(z[1], z[0], 1.0f, 1.0f) :
                       ((z[1] < z[0]) ? float4(z[0], z[1], 0.0f, 1.0f) :
                       float4(0.0f,0.0f,0.0f,0.0f));
@@ -105,19 +93,30 @@ float MSMGetShadowVisibility(float4 momentsReverseZ, float fragmentDepth, float 
     return 1.0f - saturate(shadowIntensity);
 }
 
-float ReduceLightBleeding(ShadowConstants shadowConstants, float v)
+float Linstep(float a, float b, float v)
 {
-    float f = shadowConstants.mBleedingReduction;
-    return saturate((v - f) / (1.0 - f));
+    return saturate((v - a) / (b - a));
 }
 
-float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float3 worldPos, uint cascade)
+float ReduceLightBleeding(float shadow, float lightBleedingReduction)
+{
+    return Linstep(lightBleedingReduction, 1.0, shadow);
+}
+
+float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float3 worldPos, uint cascade, float3 N, float3 L, float NoL)
 {
     // This is multiplied to the final color. 1 is fully lit, 0 is fully shadowed.
     // Getting fragment depth
-    float4 lightPos = mul(frame.mShadowCascadesViewProj[cascade], float4(worldPos, 1.0));
+    float3 pos = worldPos;
+    // Apply normal offset bias for grazing angles
+    float slopeScale = sqrt(1.0 - NoL * NoL);
+    float texelWorldSize = frame.mShadowTexelWorldSizes[cascade];
+    pos += N * (texelWorldSize * shadowConstants.mNormalBias * slopeScale);
+
+    float4 lightPos = mul(frame.mShadowCascadesViewProj[cascade], float4(pos, 1.0));
     lightPos /= lightPos.w;
     float zf = lightPos.z;
+    zf = 1.0 - zf;  // MSM evaluation input is in forward Z, not reverse Z.
 
     // Sample shadow map
     float2 uv = lightPos.xy * 0.5 + 0.5;
@@ -129,18 +128,9 @@ float GetShadowVisibility(PerFrame frame, ShadowConstants shadowConstants, float
 
     Texture2D<float4> shadowMap = GetTexture2DFloat4(frame.mHandleShadowMaps[cascade]);
     float result;
-    if(shadowConstants.mMode == SHADOW_MODE_MSM)
-    {
-        float4 moments = shadowMap.SampleLevel(SAMPLER_BILINEAR_CLAMP, uv, 0.0);
-        result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
-        result = ReduceLightBleeding(shadowConstants, result);
-    }
-    else
-    {
-        float z = shadowMap.SampleLevel(SAMPLER_POINT_CLAMP, uv, 0.0).r;
-        zf = zf - shadowConstants.mDepthBias * 0.001f;
-        result = (z > zf) ? 0.0 : 1.0;
-    }
+    float4 moments = shadowMap.SampleLevel(SAMPLER_BILINEAR_CLAMP, uv, 0.0);
+    result = MSMGetShadowVisibility(moments, zf, shadowConstants.mDepthBias * 0.001f, shadowConstants.mMomentBias * 0.001f);
+    result = ReduceLightBleeding(result, shadowConstants.mLightBleedingReduction);
 
     return result;
 }
@@ -219,6 +209,7 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 
     float NoV = saturate(dot(N, V));
     float NoL = saturate(dot(N, L));
+    //float NoL = (dot(N, L));
     float NoH = saturate(dot(N, H));
     float LoH = saturate(dot(L, H));
 
@@ -253,11 +244,10 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     // TODO(caio): Shadow cascades have sharp cutoff. Need to implement some sort of blending.
     // This should be more apparent with soft shadows.
     uint shadowCascade = GetCascadeIndex(frame, worldPos);
-    float shadowVisibility = GetShadowVisibility(frame, shadowConstants, worldPos, shadowCascade);
+    float shadowVisibility = GetShadowVisibility(frame, shadowConstants, worldPos, shadowCascade, N, L, NoL);
 
     // Directional lighting
     result.rgb += BRDF * NoL * intensity * lightColor * shadowVisibility; 
-    //result.rgb += BRDF * NoL * intensity * lightColor; 
 
     return result;
 }

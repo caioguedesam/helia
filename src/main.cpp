@@ -37,7 +37,7 @@ String gModelNames[] =
     str("Metal Roughness Spheres"),
     str("Helmet"),
 };
-uint32 gCurrentModel = 1;
+uint32 gCurrentModel = 0;
 
 // Helia
 Scene gScene = {};

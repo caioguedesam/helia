@@ -22,7 +22,7 @@
 
 // Renderer defines
 #define CONCURRENT_FRAMES 2
-#define MAX_CASCADES 3
+#define MAX_CASCADES 4
 #define MAX_DEBUG_VERTS 1000000
 #define HIZ_MAX 10
 #define SHADOW_MAP_SIZE 2048
@@ -38,7 +38,7 @@
 #define SHADOW_MODE_REGULAR 0
 #define SHADOW_MODE_MSM 1
 
-//#define MSAA_SAMPLES 4
-#define MSAA_SAMPLES 1
+#define SHADOW_MSAA_SAMPLES 4
+//#define SHADOW_MSAA_SAMPLES 1
 
 #define BLOOM_STEPS 4

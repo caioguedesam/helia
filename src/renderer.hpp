@@ -21,8 +21,8 @@ struct DirectionalLight
     v3f mColor = {1,1,1};
 };
 
-void getCascadeDistances(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances);
-m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade);
+void getCascadeDistancesAbsolute(SceneRenderer* pSceneRenderer, float* pDistances);
+m4f getCascadeViewProj(SceneRenderer* pSceneRenderer, Camera* pCam, float* pDistances, uint32 cascade, float* pOutRadius);
 
 struct PerFrame
 {
@@ -45,6 +45,7 @@ struct PerFrame
     m4f mPrevViewProjUnjitter = {};
 
     m4f mShadowCascadesViewProj[MAX_CASCADES];
+    float mShadowTexelWorldSizes[MAX_CASCADES];
 
     v4f mCamWorldPos = {0,0,0,1};
     v4f mDirLight1 = {0,0,0,1};          // xyz = Direction, w = Intensity
@@ -56,21 +57,18 @@ struct PerFrame
     HND mHandleShadowMaps[MAX_CASCADES];
     HND mHandleHiZ[HIZ_MAX];
 
-    uint32 mPadding0[3];
+    uint32 mPadding0[2];
 };
 STATIC_ASSERT(IS_ALIGNED(sizeof(PerFrame), BUFFER_ALIGN));
 
+// TODO(caio): Have one of these per cascade.
+// It could be useful to have a preset for each cascade somewhere.
 struct ShadowConstants
 {
-    uint32 mShadowMode = 1;     // 0: regular shadow mapping, 1: MSM
-    // Biases (x1000)
-    float mDepthBias = 0.f;
-    float mMomentBias = 0.003f;
+    float mDepthBias = 0.f;         // x1000
+    float mMomentBias = 0.003f;     // x1000
     float mBleedingReduction = 0.f;
-    float kSplitFactor = 0.5f;  // PSSM split weight between log/lin schemes.
-    float mFilterRadius = 1.f;
-
-    uint32 mPadding0[2];
+    float mNormalBias = -2.0f;
 };
 STATIC_ASSERT(IS_ALIGNED(sizeof(ShadowConstants), BUFFER_ALIGN));
 
@@ -81,7 +79,7 @@ struct InstanceData
 
 struct BloomSettings
 {
-    float mRadius   = 0.1f;     // in texture coordinates
+    float mRadius   = 0.01f;     // in texture coordinates
     float mStrength = 0.04f;
 };
 
@@ -108,6 +106,10 @@ struct SceneRenderer
     // Render data
     PerFrame perFrameData = {};
     ShadowConstants shadowConstants = {};
+    float mCascadeDistances[MAX_CASCADES] =
+    {
+        0.05, 0.15, 0.5, 1.0,
+    };
     Camera mCamera = {};
     DirectionalLight mDirLight = {};
     float mAmbient = 0.f;
@@ -156,15 +158,18 @@ struct SceneRenderer
     GraphicsPipeline* pPipeHiZDownsample = NULL;
 
     // Shadow map pass
-    RenderTarget* pRTShadows[MAX_CASCADES];
-    RenderTarget* pRTShadowsResolved[MAX_CASCADES];
     RenderTarget* pRTShadowsDepth;
+    RenderTarget* pRTShadowsDepthResolved;
+    RenderTarget* pRTShadowMoments[MAX_CASCADES];
     Shader* pVSShadowMapPass = NULL;
     Shader* pPSShadowMapPass = NULL;
     Shader* pVSShadowMapPassDoubleSided = NULL;
     Shader* pPSShadowMapPassDoubleSided = NULL;
+    Shader* pVSMSM = NULL;
+    Shader* pPSMSM = NULL;
     GraphicsPipeline* pPipeShadowMapPass = NULL;
     GraphicsPipeline* pPipeShadowMapPassDoubleSided = NULL;
+    GraphicsPipeline* pPipeMSM = NULL;
 
     // Depth pre-pass
     RenderTarget* pRTSceneDepth;

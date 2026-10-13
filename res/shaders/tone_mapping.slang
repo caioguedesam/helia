@@ -52,6 +52,17 @@ float3 ToneMapping_Hable(float3 v)
     return curr * white_scale;
 }
 
+float InterleavedGradientNoise(float2 px)
+{
+    return frac(52.9829189 * frac(dot(px, float2(0.06711056, 0.00583715))));
+}
+
+float TriangularNoise(float2 px)
+{
+    float n = InterleavedGradientNoise(px) * 2.0 - 1.0;
+    return sign(n) * (1.0 - sqrt(1.0 - abs(n)));
+}
+
 VS_ENTRY
 PSIn VSMain(VSIn vsIn)
 {
@@ -80,6 +91,9 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     // Gamma correction
     float gammaFactor = 1.0 / 2.2;
     result.rgb = pow(result.rgb, float3(gammaFactor, gammaFactor, gammaFactor));
+
+    // Dither
+    result.rgb += TriangularNoise(psIn.pos.xy) / 255.0;
 
     return float4(result.rgb, 1.0);
 }

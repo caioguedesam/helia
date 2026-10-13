@@ -47,9 +47,10 @@ PSIn VSMain(VSIn vsIn,
 }
 
 PS_ENTRY
-float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
+//float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
+void PSMain(PSIn psIn, uniform Params params) : SV_Target
 {
-    // TODO(caio): Not great that shadow pass
+    // TODO(caio): Separate shadow map pass in vertex only pass and alpha masked pass (which required pixel shader)
     SamplerState samplerLinear = SAMPLER_TRILINEAR_WRAP;
     SceneNode node = GetBuffer(SceneNode, params.pNodes)[psIn.nodeId];
     SceneMaterial material = GetBuffer(SceneMaterial, params.pMaterials)[node.mMaterialId];
@@ -65,10 +66,5 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
         discard;
     }
 
-    // Storing moments 1 - 4 in shadow map
-    float z = psIn.pos.z;
-    float z2 = z * z;
-    float z3 = z2 * z;
-    float z4 = z2 * z2;
-    return float4(z, z2, z3, z4);
+    return;
 }

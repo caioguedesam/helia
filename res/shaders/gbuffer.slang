@@ -10,7 +10,10 @@ struct Params
 };
 
 // Normal mapping can opt in to precomputed tangents. Useful for checking if model has proper tangents.
-#define VERTEX_TANGENTS 1
+// Note: metal rough spheres don't have tangent setup.
+// TODO(caio): Make it so this selects correct mode based on model.
+#define VERTEX_TANGENTS 0
+//#define VERTEX_TANGENTS 1
 
 struct VSIn
 {
@@ -150,7 +153,7 @@ PSOut PSMain(PSIn psIn,
 #else
     float3 camPos = frame.mCamWorldPos.xyz;
     float3 V = normalize(camPos - psIn.worldPos);
-    float3x3 TBN = GetTBN(vertexNormal, -V, uv);
+    float3x3 TBN = transpose(GetTBN(vertexNormal, psIn.worldPos, uv));
 #endif
     float3 normal = normalMap.Sample(samplerLinear, uv).rgb;
     normal = normalize(normal * 2.0f - 1.0f);

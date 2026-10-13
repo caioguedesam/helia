@@ -63,6 +63,7 @@ struct PerFrame
     float4x4 mPrevViewProjUnjitter;
 
     float4x4 mShadowCascadesViewProj[MAX_CASCADES];
+    float mShadowTexelWorldSizes[MAX_CASCADES];
 
     // TODO(caio): Pass precalculated matrices
     // (inverses, tranpose inverse for normals, composites, etc.)
@@ -79,20 +80,14 @@ struct PerFrame
 
     uint mPadding0;
     uint mPadding1;
-    uint mPadding2;
 };
 
 struct ShadowConstants
 {
-    uint mMode;
     float mDepthBias;
     float mMomentBias;
-    float mBleedingReduction;
-    float mCascadeSplitFactor;
-    float mFilterRadius;
-
-    uint mPadding0;
-    uint mPadding1;
+    float mLightBleedingReduction;
+    float mNormalBias;
 };
 
 // TODO(caio): Do I need to align this to 16 byte?
