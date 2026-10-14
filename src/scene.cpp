@@ -141,10 +141,14 @@ void setupSceneModel(Scene* pScene, String modelPath)
         mat.mBaseColor = to4f(pPBR->base_color_factor);
         mat.mRoughness = pPBR->roughness_factor;
         mat.mMetallic = pPBR->metallic_factor;
+        mat.mEmissive = {0.f, 0.f, 0.f, 0.f};
+        mat.mOcclusion = 1.f;
 
         mat.mBaseColorTexture = FALLBACK_BASECOLOR_INDEX;
         mat.mNormalTexture = FALLBACK_NORMAL_INDEX;
         mat.mMetallicRoughnessTexture = FALLBACK_MRS_INDEX;
+        mat.mEmissiveTexture = FALLBACK_BASECOLOR_INDEX;
+        mat.mOcclusionTexture = FALLBACK_BASECOLOR_INDEX;
 
         if(pPBR->base_color_texture.texture)
         {
@@ -162,6 +166,26 @@ void setupSceneModel(Scene* pScene, String modelPath)
         {
             mat.mNormalTexture = cgltf_texture_index(pGltfData, pMat->normal_texture.texture) + FALLBACK_TEXTURE_COUNT;
             uint32 texInfoId = texInfoByPath.getValue(str(pMat->normal_texture.texture->image->uri));
+            pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
+        }
+        if(pMat->emissive_texture.texture)
+        {
+            mat.mEmissive =
+            {
+                pMat->emissive_factor[0],
+                pMat->emissive_factor[1],
+                pMat->emissive_factor[2],
+                1.0f,
+            };
+            mat.mEmissiveTexture = cgltf_texture_index(pGltfData, pMat->emissive_texture.texture) + FALLBACK_TEXTURE_COUNT;
+            uint32 texInfoId = texInfoByPath.getValue(str(pMat->emissive_texture.texture->image->uri));
+            pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_SRGB;
+        }
+        if(pMat->occlusion_texture.texture)
+        {
+            // TODO(caio): Take occlusion strength into account instead of fixed strength term
+            mat.mOcclusionTexture = cgltf_texture_index(pGltfData, pMat->occlusion_texture.texture) + FALLBACK_TEXTURE_COUNT;
+            uint32 texInfoId = texInfoByPath.getValue(str(pMat->occlusion_texture.texture->image->uri));
             pScene->mTexInfos[texInfoId].mFormat = FORMAT_RGBA8_UNORM;
         }
         if(pMat->alpha_mode != cgltf_alpha_mode_opaque)

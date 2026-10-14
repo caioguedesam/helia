@@ -116,7 +116,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
     initResourceManager(pRenderer, pAppArena, &pSceneRenderer->mResMan);
     ResourceManager* pResMan = &pSceneRenderer->mResMan;
 
-    // Bindless fallback texture (must be first)
+    // Bindless fallback texture (must be first, index 0)
     {
         TextureDesc desc = {};
         desc.mWidth = 1;
@@ -141,6 +141,8 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
 
         endCmd(pCmd);
         submitImmediateCmd(pRenderer, pCmd);
+
+        pSceneRenderer->pTexMaterialMaps[FALLBACK_BINDLESS_INDEX] = pSceneRenderer->pTexSampledStorageFallback;
     }
 
     // Load textures from scene model
@@ -159,7 +161,7 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         }
     }
 
-    // Load fallback textures
+    // Load fallback textures (indices 1 to 3)
     {
         Texture* pTexFallbackBaseColor = NULL;
         loadTexture(pAssetManager, &pSceneRenderer->mResMan, str("../../res/textures/white.png"),
@@ -185,6 +187,8 @@ void initSceneRenderer(SceneRenderer* pSceneRenderer,
         pMat->mBaseColorTexture = getHandle(pSceneRenderer->pTexMaterialMaps[pMat->mBaseColorTexture]);
         pMat->mNormalTexture = getHandle(pSceneRenderer->pTexMaterialMaps[pMat->mNormalTexture]);
         pMat->mMetallicRoughnessTexture = getHandle(pSceneRenderer->pTexMaterialMaps[pMat->mMetallicRoughnessTexture]);
+        pMat->mEmissiveTexture = getHandle(pSceneRenderer->pTexMaterialMaps[pMat->mEmissiveTexture]);
+        pMat->mOcclusionTexture = getHandle(pSceneRenderer->pTexMaterialMaps[pMat->mOcclusionTexture]);
     }
 
     // Geometry vertex layout
@@ -521,6 +525,8 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
         initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferAlbedoMetallic);
         desc.mFormat = FORMAT_A2RGB10_UNORM;
         initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferNormalRoughness);
+        desc.mFormat = FORMAT_B10G11R11_UFLOAT;
+        initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferEmissive);
         desc.mFormat = FORMAT_RG16_SFLOAT;
         initRenderTarget(&pSceneRenderer->mResMan, desc, &pSceneRenderer->pRTGBufferVelocity);
     }
@@ -552,6 +558,7 @@ void addSceneRenderTargets(SceneRenderer* pSceneRenderer)
 
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferAlbedoMetallic);
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferNormalRoughness);
+        cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferEmissive);
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTGBufferVelocity);
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTCurrentHDR);
         cmdPrepareRenderTarget(pCmd, pSceneRenderer->pRTPreviousHDR);
@@ -748,10 +755,11 @@ void addScenePipelines(SceneRenderer* pSceneRenderer)
     // GBuffer pass pipeline
     {
         GraphicsPipelineDesc desc = {};
-        desc.mRenderTargetCount = 3;
+        desc.mRenderTargetCount = 4;
         desc.mRenderTargetFormats[0] = pSceneRenderer->pRTGBufferAlbedoMetallic->mDesc.mFormat;
         desc.mRenderTargetFormats[1] = pSceneRenderer->pRTGBufferNormalRoughness->mDesc.mFormat;
-        desc.mRenderTargetFormats[2] = pSceneRenderer->pRTGBufferVelocity->mDesc.mFormat;
+        desc.mRenderTargetFormats[2] = pSceneRenderer->pRTGBufferEmissive->mDesc.mFormat;
+        desc.mRenderTargetFormats[3] = pSceneRenderer->pRTGBufferVelocity->mDesc.mFormat;
         desc.mDepthTargetFormat = pSceneRenderer->pRTSceneDepth->mDesc.mFormat;
 
         desc.mVertexLayout = pSceneRenderer->mVLSceneGeometry;
@@ -963,6 +971,7 @@ void removeSceneRenderTargets(SceneRenderer* pSceneRenderer)
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTBloom);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferAlbedoMetallic);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferNormalRoughness);
+    destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferEmissive);
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTGBufferVelocity);
 
     destroyRenderTarget(&pSceneRenderer->mResMan, &pSceneRenderer->pRTSceneDepth);
@@ -1825,22 +1834,25 @@ void passGBuffer(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fram
     RENDERER_SCOPE_BEGIN("G-Buffer Pass");
     RenderTarget* pRTAlbedoMetallic = pSceneRenderer->pRTGBufferAlbedoMetallic;
     RenderTarget* pRTNormalRoughness = pSceneRenderer->pRTGBufferNormalRoughness;
+    RenderTarget* pRTEmissive = pSceneRenderer->pRTGBufferEmissive;
     RenderTarget* pRTVelocity = pSceneRenderer->pRTGBufferVelocity;
     RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeGBuffer;
 
-    RenderTargetBarrier barriers[3];
+    RenderTargetBarrier barriers[4];
     barriers[0] = {pRTAlbedoMetallic, getImageLayout(pRTAlbedoMetallic), IMAGE_LAYOUT_COLOR_OUTPUT };
     barriers[1] = {pRTNormalRoughness, getImageLayout(pRTNormalRoughness), IMAGE_LAYOUT_COLOR_OUTPUT };
-    barriers[2] = {pRTVelocity, getImageLayout(pRTVelocity), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[2] = {pRTEmissive, getImageLayout(pRTEmissive), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[3] = {pRTVelocity, getImageLayout(pRTVelocity), IMAGE_LAYOUT_COLOR_OUTPUT };
     cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
     RenderTargetBindDesc bindDesc = {};
-    bindDesc.mColorCount = 3;
+    bindDesc.mColorCount = 4;
     bindDesc.mColorBindings[0] = { pRTAlbedoMetallic, LOAD_OP_CLEAR, STORE_OP_STORE };
     bindDesc.mColorBindings[1] = { pRTNormalRoughness, LOAD_OP_CLEAR, STORE_OP_STORE };
-    bindDesc.mColorBindings[2] = { pRTVelocity, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorBindings[2] = { pRTEmissive, LOAD_OP_CLEAR, STORE_OP_STORE };
+    bindDesc.mColorBindings[3] = { pRTVelocity, LOAD_OP_CLEAR, STORE_OP_STORE };
     bindDesc.mDepthBinding = { pRTDepth, LOAD_OP_LOAD, STORE_OP_STORE };
     cmdBindRenderTargets(pCmd, bindDesc);
 
@@ -1875,16 +1887,18 @@ void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
     RENDERER_SCOPE_BEGIN("Lighting Pass");
     RenderTarget* pRTAlbedoMetallic = pSceneRenderer->pRTGBufferAlbedoMetallic;
     RenderTarget* pRTNormalRoughness = pSceneRenderer->pRTGBufferNormalRoughness;
+    RenderTarget* pRTEmissive = pSceneRenderer->pRTGBufferEmissive;
     RenderTarget* pRTDepth = pSceneRenderer->pRTSceneDepth;
     RenderTarget* pRTLighting = pSceneRenderer->pRTCurrentHDR;
 
     GraphicsPipeline* pPipeline = pSceneRenderer->pPipeLighting;
 
-    RenderTargetBarrier barriers[4];
+    RenderTargetBarrier barriers[5];
     barriers[0] = {pRTAlbedoMetallic, getImageLayout(pRTAlbedoMetallic), IMAGE_LAYOUT_SHADER_READ_ONLY };
     barriers[1] = {pRTNormalRoughness, getImageLayout(pRTNormalRoughness), IMAGE_LAYOUT_SHADER_READ_ONLY };
-    barriers[2] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
-    barriers[3] = {pRTLighting, getImageLayout(pRTLighting), IMAGE_LAYOUT_COLOR_OUTPUT };
+    barriers[2] = {pRTEmissive, getImageLayout(pRTEmissive), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    barriers[3] = {pRTDepth, getImageLayout(pRTDepth), IMAGE_LAYOUT_SHADER_READ_ONLY };
+    barriers[4] = {pRTLighting, getImageLayout(pRTLighting), IMAGE_LAYOUT_COLOR_OUTPUT };
     cmdRenderTargetBarrier(pCmd, ARR_LEN(barriers), barriers);
 
     RenderTargetBindDesc bindDesc = {};
@@ -1902,6 +1916,7 @@ void passLighting(CommandBuffer* pCmd, SceneRenderer* pSceneRenderer, uint32 fra
     cmdPushShaderConstant(pCmd, getHandle(pSceneRenderer->pCBShadowConstants[frame]));
     cmdPushShaderConstant(pCmd, getHandle(pRTAlbedoMetallic));
     cmdPushShaderConstant(pCmd, getHandle(pRTNormalRoughness));
+    cmdPushShaderConstant(pCmd, getHandle(pRTEmissive));
     cmdPushShaderConstant(pCmd, getHandle(pRTDepth));
     cmdSetShaderConstants(pCmd, pSceneRenderer->pRenderer);
 

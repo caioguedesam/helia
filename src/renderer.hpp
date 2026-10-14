@@ -183,6 +183,7 @@ struct SceneRenderer
     // GBuffer draw pass
     RenderTarget* pRTGBufferAlbedoMetallic = NULL;
     RenderTarget* pRTGBufferNormalRoughness = NULL;
+    RenderTarget* pRTGBufferEmissive = NULL;
     RenderTarget* pRTGBufferVelocity = NULL;
     Shader* pVSGBuffer = NULL;
     Shader* pPSGBuffer = NULL;

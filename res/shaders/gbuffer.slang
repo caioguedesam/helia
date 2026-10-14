@@ -41,7 +41,8 @@ struct PSOut
 {
     float4 gbufferAlbedoMetallic : SV_Target0;
     float4 gbufferNormalRoughness : SV_Target1;
-    float2 gbufferVelocity : SV_Target2;
+    float3 gbufferEmissive : SV_Target2;
+    float2 gbufferVelocity : SV_Target3;
 };
 
 float3x3 GetTBN(float3 N, float3 p, float2 uv)
@@ -123,10 +124,16 @@ PSOut PSMain(PSIn psIn,
     Texture2D<float4> baseColorMap          = GetTexture2DFloat4(material.mBaseColorTexId);
     Texture2D<float4> normalMap             = GetTexture2DFloat4(material.mNormalTexId);
     Texture2D<float4> metallicRoughnessMap  = GetTexture2DFloat4(material.mMetallicRoughnessTexId);
+    Texture2D<float4> emissiveMap           = GetTexture2DFloat4(material.mEmissiveTexId);
+    Texture2D<float4> aoMap                 = GetTexture2DFloat4(material.mOcclusionTexId);
 
     // Diffuse color
     float2 uv = psIn.uv;
     float4 baseColor = baseColorMap.Sample(samplerLinear, uv);
+    float ao = aoMap.Sample(samplerLinear, uv).r;
+    float3 albedo = (baseColor.rgb * material.mBaseColor.rgb) * (ao * material.mOcclusion);
+    float3 emissive = emissiveMap.Sample(samplerLinear, uv).rgb * material.mEmissive.rgb;
+
     float mask = step(material.mAlphaCutoff, baseColor.a);
     if(mask < 1.0)
     {
@@ -168,12 +175,15 @@ PSOut PSMain(PSIn psIn,
     float4 metallicRoughness = metallicRoughnessMap.Sample(samplerLinear, uv);
 
     // Writing outputs to GBuffer
-    output.gbufferAlbedoMetallic = float4(baseColor.rgb * material.mBaseColor.rgb,
+    //-output.gbufferAlbedoMetallic = float4(baseColor.rgb * material.mBaseColor.rgb,
+    output.gbufferAlbedoMetallic = float4(albedo,
             metallicRoughness.g * material.mRoughness);
 
     output.gbufferNormalRoughness = float4(EncodeNormal(normal),
             metallicRoughness.b * material.mMetallic,
             0.0);
+
+    output.gbufferEmissive = emissive;
 
     output.gbufferVelocity = velocity;
 

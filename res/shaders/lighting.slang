@@ -6,6 +6,7 @@ struct Params
     uint pShadowConstants;
     uint gbufferAlbedoMetallic;
     uint gbufferNormalRoughness;
+    uint gbufferEmissive;
     uint depthBuffer;
 };
 
@@ -189,11 +190,13 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
     SamplerState samplerPoint           = SAMPLER_POINT_CLAMP;
     Texture2D<float4> albedoMetallic    = GetTexture2DFloat4(params.gbufferAlbedoMetallic);
     Texture2D<float4> normalRoughness   = GetTexture2DFloat4(params.gbufferNormalRoughness);
+    Texture2D<float4> emissive          = GetTexture2DFloat4(params.gbufferEmissive);
     Texture2D<float4> depthBuffer       = GetTexture2DFloat4(params.depthBuffer);
 
     float2 uv = psIn.uv;
     float4 sampleA = albedoMetallic.Sample(samplerPoint, uv);   // rgb = Diffuse color, a = Roughness
     float4 sampleB = normalRoughness.Sample(samplerPoint, uv);   // rg = Encoded normal, b = Metallic
+    float3 sampleEmissive = emissive.Sample(samplerPoint, uv).rgb;
     float depth = depthBuffer.Sample(samplerPoint, uv).r;
     if(depth == 0.0) return float4(0.0, 0.0, 0.0, 1.0);
 
@@ -248,6 +251,9 @@ float4 PSMain(PSIn psIn, uniform Params params) : SV_Target
 
     // Directional lighting
     result.rgb += BRDF * NoL * intensity * lightColor * shadowVisibility; 
+
+    // Emissive
+    result.rgb += sampleEmissive;
 
     return result;
 }

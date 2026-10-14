@@ -18,18 +18,22 @@ STATIC_ASSERT(IS_ALIGNED(sizeof(SceneMesh), BUFFER_ALIGN));
 struct SceneMaterial
 {
     v4f     mBaseColor = {1,1,1,1};
+    v4f     mEmissive = {0,0,0,0};
     float   mMetallic = 1.f;
     float   mRoughness = 1.f;
+    float   mOcclusion = 1.f;
 
     uint32  mBaseColorTexture           = FALLBACK_BASECOLOR_INDEX;
     uint32  mNormalTexture              = FALLBACK_NORMAL_INDEX;
     uint32  mMetallicRoughnessTexture   = FALLBACK_MRS_INDEX;
-    // TODO(caio): Emissive, occlusion, other stuff
+    uint32  mEmissiveTexture            = FALLBACK_BASECOLOR_INDEX;
+    uint32  mOcclusionTexture           = FALLBACK_BASECOLOR_INDEX;
 
     float   mAlphaCutoff = 0.f;
     uint32  mDoubleSided = 1;
 
-    uint32  mPadding0;
+    uint32 mPadding0;
+    uint32 mPadding1;
 };
 STATIC_ASSERT(IS_ALIGNED(sizeof(SceneMaterial), BUFFER_ALIGN));
 

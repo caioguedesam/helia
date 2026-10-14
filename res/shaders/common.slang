@@ -28,18 +28,23 @@ struct SceneNode
 
 struct SceneMaterial
 {
-    float4 mBaseColor;
-    float mMetallic;
-    float mRoughness;
+    float4  mBaseColor;
+    float4  mEmissive;
+    float   mMetallic;
+    float   mRoughness;
+    float   mOcclusion;
 
-    uint mBaseColorTexId;
-    uint mNormalTexId;
-    uint mMetallicRoughnessTexId;
+    uint    mBaseColorTexId;
+    uint    mNormalTexId;
+    uint    mMetallicRoughnessTexId;
+    uint    mEmissiveTexId;
+    uint    mOcclusionTexId;
 
-    float mAlphaCutoff;
-    uint mDoubleSided;
-    
-    uint mPadding0;
+    float   mAlphaCutoff;
+    uint    mDoubleSided;
+
+    uint    mPadding0;
+    uint    mPadding1;
 };
 
 struct PerFrame
